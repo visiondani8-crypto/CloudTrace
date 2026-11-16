@@ -1,0 +1,4 @@
+incidentCaseNumber,observedAt,title,category,sourceName,sourceEventId,assetName,provenance,contentText,sourceUri
+CT-2026-002,2026-11-14T09:01:00Z,Fictional failed sign-in 1,AUTH_EVENT,Synthetic identity-monitoring fixture,SYN-AUTH-001,Demo Identity Provider,SYNTHETIC,"Failed login for fictional account test.user@example.invalid from 192.0.2.25. Synthetic record.",
+CT-2026-002,2026-11-14T09:02:00Z,Fictional failed sign-in 2,AUTH_EVENT,Synthetic identity-monitoring fixture,SYN-AUTH-002,Demo Identity Provider,SYNTHETIC,"Repeated failed login from documentation IP 192.0.2.25. Synthetic record.",
+CT-2026-002,2026-11-14T09:05:00Z,Fictional successful sign-in,AUTH_EVENT,Synthetic identity-monitoring fixture,SYN-AUTH-003,Demo Identity Provider,SYNTHETIC,"Successful login from 198.51.100.17. Requires verification; does not prove account takeover. Synthetic record.",

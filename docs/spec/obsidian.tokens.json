@@ -1,0 +1,144 @@
+{
+  "name": "CloudTrace Obsidian",
+  "version": "1.0",
+  "status": "approved",
+  "colors": {
+    "base": "#0A0F16",
+    "sidebar": "#0D131C",
+    "topbar": "#0E141D",
+    "surface": "#121A25",
+    "surfaceRaised": "#151F2B",
+    "hover": "#192331",
+    "selected": "#1A293A",
+    "border": "#263140",
+    "borderStrong": "#39485A",
+    "text": "#E8EDF5",
+    "textStrong": "#F0F4FA",
+    "textSecondary": "#99A8B9",
+    "textTertiary": "#8495AA",
+    "textDisabled": "#69788B",
+    "blue": "#79ABF0",
+    "blueButton": "#28649F",
+    "blueButtonHover": "#3776B3",
+    "blueTint": "#1B2C40",
+    "amber": "#E4AD68",
+    "amberTint": "#34291E",
+    "red": "#E17E7E",
+    "redTint": "#351E23",
+    "green": "#91BAA4",
+    "greenTint": "#1B302A",
+    "focusRing": "#9EC5FF",
+    "chartGrid": "#253141",
+    "chartBlue": "#527CAB",
+    "chartAmber": "#D49B5E"
+  },
+  "fonts": {
+    "primary": "Inter, -apple-system, BlinkMacSystemFont, Segoe UI, Arial, sans-serif",
+    "technical": "IBM Plex Mono, SFMono-Regular, Consolas, Liberation Mono, monospace"
+  },
+  "typography": {
+    "pageTitle": {
+      "sizePx": 24,
+      "lineHeightPx": 30,
+      "weight": 680
+    },
+    "sectionTitle": {
+      "sizePx": 14,
+      "lineHeightPx": 21,
+      "weight": 650
+    },
+    "panelTitle": {
+      "sizePx": 13,
+      "lineHeightPx": 20,
+      "weight": 650
+    },
+    "body": {
+      "sizePx": 13,
+      "lineHeightPx": 20,
+      "weight": 400
+    },
+    "bodyLarge": {
+      "sizePx": 14,
+      "lineHeightPx": 21,
+      "weight": 400
+    },
+    "table": {
+      "sizePx": 13,
+      "lineHeightPx": 19,
+      "weight": 450
+    },
+    "small": {
+      "sizePx": 12,
+      "lineHeightPx": 18,
+      "weight": 400
+    },
+    "eyebrow": {
+      "sizePx": 11,
+      "lineHeightPx": 16,
+      "weight": 700,
+      "letterSpacingPx": 0.7
+    },
+    "kpi": {
+      "sizePx": 26,
+      "lineHeightPx": 31,
+      "weight": 650
+    },
+    "technical": {
+      "sizePx": 12,
+      "lineHeightPx": 18,
+      "weight": 450
+    }
+  },
+  "radiiPx": {
+    "tag": 4,
+    "button": 5,
+    "panel": 6,
+    "modal": 8
+  },
+  "spacingPx": [
+    2,
+    4,
+    6,
+    8,
+    12,
+    16,
+    20,
+    24,
+    28,
+    32,
+    40,
+    48,
+    64
+  ],
+  "layout": {
+    "sidebarWidthPx": 216,
+    "topbarHeightPx": 58,
+    "pageGutterDesktopPx": 32,
+    "panelPaddingPx": 16,
+    "panelGapPx": 12,
+    "wideColumnsRatio": "62/38",
+    "drawerWidthMinPx": 380,
+    "drawerWidthMaxPx": 440
+  },
+  "breakpointsPx": {
+    "verySmall": 320,
+    "mobile": 480,
+    "tablet": 768,
+    "laptop": 1024,
+    "desktop": 1200,
+    "wideDesktop": 1440
+  },
+  "modes": {
+    "default": "obsidian-dark",
+    "lightThemeIncluded": false
+  },
+  "reference": "CLOUDTRACE_OBSIDIAN_DESIGN_SPEC.md",
+  "requirements": {
+    "provenanceBadges": true,
+    "noFakeLiveStatus": true,
+    "explicitAtRiskVsAffected": true,
+    "wcagAA": true,
+    "reducedMotion": true,
+    "realFunctionalUI": true
+  }
+}

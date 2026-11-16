@@ -1,0 +1,496 @@
+// CloudTrace data model.
+//
+// SQLite is the default for a frictionless offline demo. Enumerations are stored
+// as validated strings (see src/lib/domain/enums.ts) so the schema can move to
+// PostgreSQL later; switching providers still requires a migration review.
+//
+// Every organisation-bound table carries a non-null organizationId, and all data
+// access goes through org-scoped service functions (src/lib/services/*).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberships         Membership[]
+  incidents           Incident[]
+  assets              Asset[]
+  dependencies        Dependency[]
+  incidentAssets      IncidentAsset[]
+  evidence            Evidence[]
+  evidenceAnnotations EvidenceAnnotation[]
+  timelineEvents      TimelineEvent[]
+  hypotheses          Hypothesis[]
+  hypothesisEvidence  HypothesisEvidence[]
+  tasks               ResponseTask[]
+  taskEvidence        TaskEvidence[]
+  notes               InvestigationNote[]
+  analyses            InvestigationAnalysis[]
+  reports             ReportSnapshot[]
+  importJobs          ImportJob[]
+  connections         ProviderConnection[]
+  providerIssues      ProviderServiceIssue[]
+  auditEntries        AuditEntry[]
+  incidentSources     IncidentSource[]
+}
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  name         String
+  passwordHash String
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  memberships Membership[]
+}
+
+/// role: OWNER | ANALYST | VIEWER
+model Membership {
+  id             String   @id @default(cuid())
+  organizationId String
+  userId         String
+  role           String
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, userId])
+  @@index([userId])
+}
+
+/// type: PROVIDER_OUTAGE | SECURITY_SUSPICION | CONFIGURATION_FAILURE | OTHER
+/// severity: LOW | MEDIUM | HIGH | CRITICAL
+/// status: OPEN | INVESTIGATING | MONITORING | RESOLVED
+/// classification: PROVIDER_TECHNICAL | SECURITY_SUSPECTED | CONFIRMED_SECURITY | CONFIGURATION | UNDETERMINED
+model Incident {
+  id             String    @id @default(cuid())
+  organizationId String
+  caseNumber     String
+  title          String
+  description    String
+  type           String
+  severity       String
+  status         String
+  classification String
+  startedAt      DateTime?
+  resolvedAt     DateTime?
+  /// Membership-validated user id of the case owner (same organisation).
+  ownerId        String?
+  isDemo         Boolean   @default(false)
+  /// Visible data-mode label, e.g. "PUBLIC REPORT + SIMULATED".
+  dataLabel      String?
+  createdById    String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization   Organization            @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  incidentAssets IncidentAsset[]
+  evidence       Evidence[]
+  timelineEvents TimelineEvent[]
+  hypotheses     Hypothesis[]
+  tasks          ResponseTask[]
+  notes          InvestigationNote[]
+  analyses       InvestigationAnalysis[]
+  reports        ReportSnapshot[]
+  importJobs     ImportJob[]
+  sources        IncidentSource[]
+
+  @@unique([organizationId, caseNumber])
+  @@index([organizationId, updatedAt])
+}
+
+/// External public references (status pages, documentation) cited by a case.
+/// status: PRELIMINARY | FINAL | DOCUMENTATION | ROADMAP_REFERENCE
+model IncidentSource {
+  id             String   @id @default(cuid())
+  organizationId String
+  incidentId     String
+  title          String
+  url            String
+  publisher      String?
+  retrievedAt    DateTime
+  status         String
+  note           String?
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  incident     Incident     @relation(fields: [incidentId], references: [id], onDelete: Restrict)
+
+  @@unique([incidentId, url])
+}
+
+/// provider: MICROSOFT_365 | AZURE | AWS | GCP | INTERNAL | OTHER
+/// criticality: LOW | MEDIUM | HIGH | CRITICAL
+model Asset {
+  id                 String   @id @default(cuid())
+  organizationId     String
+  name               String
+  provider           String
+  assetType          String
+  description        String?
+  owner              String?
+  criticality        String
+  externalResourceId String?
+  isSynthetic        Boolean  @default(false)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  consumerOf     Dependency[]    @relation("ConsumerAsset")
+  providerFor    Dependency[]    @relation("ProviderAsset")
+  incidentAssets IncidentAsset[]
+  evidence       Evidence[]
+  timelineEvents TimelineEvent[]
+
+  @@unique([organizationId, name])
+}
+
+/// consumer DEPENDS_ON provider. Self-edges are rejected by the service layer.
+model Dependency {
+  id               String   @id @default(cuid())
+  organizationId   String
+  consumerAssetId  String
+  providerAssetId  String
+  relationshipType String   @default("DEPENDS_ON")
+  description      String?
+  createdAt        DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  consumer     Asset        @relation("ConsumerAsset", fields: [consumerAssetId], references: [id], onDelete: Cascade)
+  provider     Asset        @relation("ProviderAsset", fields: [providerAssetId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, consumerAssetId, providerAssetId])
+}
+
+/// Assets in scope for an incident plus the analyst-recorded observed status.
+/// observedStatus: UNKNOWN | HEALTHY | DEGRADED | DOWN (non-UNKNOWN requires statusEvidenceId)
+model IncidentAsset {
+  id               String    @id @default(cuid())
+  organizationId   String
+  incidentId       String
+  assetId          String
+  observedStatus   String    @default("UNKNOWN")
+  observedAt       DateTime?
+  statusEvidenceId String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  incident     Incident     @relation(fields: [incidentId], references: [id], onDelete: Restrict)
+  asset        Asset        @relation(fields: [assetId], references: [id], onDelete: Restrict)
+
+  @@unique([incidentId, assetId])
+}
+
+/// Evidence rows are immutable after creation; analyst annotations are separate.
+/// category: PROVIDER_NOTICE | HEALTH_EVENT | AUTH_EVENT | CHANGE_EVENT | APP_LOG | ANALYST_NOTE | OTHER
+/// provenance: PUBLIC_REPORTED | CUSTOMER_OBSERVED | SYNTHETIC | ANALYST_NOTE
+/// confidenceLevel: CONFIRMED_BY_SOURCE | CORROBORATED | UNVERIFIED | DISPUTED
+/// assetStatus: what this record asserts about the linked asset (HEALTHY | DEGRADED | DOWN), optional
+model Evidence {
+  id              String   @id @default(cuid())
+  organizationId  String
+  /// Sequential per organisation; displayed as EV-0001.
+  refNumber       Int
+  incidentId      String
+  assetId         String?
+  title           String
+  category        String
+  provenance      String
+  sourceName      String
+  sourceUri       String?
+  sourceEventId   String?
+  contentText     String
+  /// SHA-256 of the canonical evidence payload (see src/lib/evidence/normalise.ts).
+  sha256          String
+  observedAt      DateTime
+  ingestedAt      DateTime @default(now())
+  isSynthetic     Boolean
+  confidenceLevel String
+  assetStatus     String?
+  createdById     String?
+  importJobId     String?
+  /// Raw import metadata (source file name, row number) as JSON.
+  rawMetadataJson String?
+
+  organization Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  incident     Incident             @relation(fields: [incidentId], references: [id], onDelete: Restrict)
+  asset        Asset?               @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  importJob    ImportJob?           @relation(fields: [importJobId], references: [id], onDelete: SetNull)
+  annotations  EvidenceAnnotation[]
+  timeline     TimelineEvent[]
+  hypotheses   HypothesisEvidence[]
+  tasks        TaskEvidence[]
+
+  @@unique([organizationId, refNumber])
+  @@unique([organizationId, sourceName, sourceEventId])
+  @@index([organizationId, incidentId, observedAt])
+  @@index([organizationId, sha256])
+}
+
+model EvidenceAnnotation {
+  id             String   @id @default(cuid())
+  organizationId String
+  evidenceId     String
+  authorId       String
+  text           String
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  evidence     Evidence     @relation(fields: [evidenceId], references: [id], onDelete: Restrict)
+
+  @@index([evidenceId])
+}
+
+/// sourceClass mirrors evidence provenance; ANALYST_NOTE without evidence is "Analyst-entered / unverified".
+model TimelineEvent {
+  id             String   @id @default(cuid())
+  organizationId String
+  incidentId     String
+  evidenceId     String?
+  assetId        String?
+  occurredAt     DateTime
+  eventType      String
+  title          String
+  description    String?
+  sourceClass    String
+  createdById    String?
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  incident     Incident     @relation(fields: [incidentId], references: [id], onDelete: Restrict)
+  evidence     Evidence?    @relation(fields: [evidenceId], references: [id], onDelete: SetNull)
+  asset        Asset?       @relation(fields: [assetId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, incidentId, occurredAt])
+}
+
+/// confidence: LOW | MEDIUM | HIGH ; status: OPEN | SUPPORTED | REJECTED | UNRESOLVED
+model Hypothesis {
+  id             String   @id @default(cuid())
+  organizationId String
+  incidentId     String
+  title          String
+  description    String
+  confidence     String
+  status         String
+  /// Caveat shown with the hypothesis (e.g. "provider-reported preliminary explanation").
+  note           String?
+  createdById    String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  incident     Incident             @relation(fields: [incidentId], references: [id], onDelete: Restrict)
+  evidence     HypothesisEvidence[]
+}
+
+/// relation: SUPPORTING | CONTRADICTING
+model HypothesisEvidence {
+  id             String @id @default(cuid())
+  organizationId String
+  hypothesisId   String
+  evidenceId     String
+  relation       String
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  hypothesis   Hypothesis   @relation(fields: [hypothesisId], references: [id], onDelete: Cascade)
+  evidence     Evidence     @relation(fields: [evidenceId], references: [id], onDelete: Restrict)
+
+  @@unique([hypothesisId, evidenceId, relation])
+}
+
+/// priority: LOW | MEDIUM | HIGH ; status: OPEN | IN_PROGRESS | DONE | CANCELLED
+model ResponseTask {
+  id             String    @id @default(cuid())
+  organizationId String
+  incidentId     String
+  title          String
+  description    String?
+  priority       String
+  status         String
+  assigneeId     String?
+  dueAt          DateTime?
+  completedAt    DateTime?
+  createdById    String
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  incident     Incident       @relation(fields: [incidentId], references: [id], onDelete: Restrict)
+  evidence     TaskEvidence[]
+}
+
+model TaskEvidence {
+  id             String @id @default(cuid())
+  organizationId String
+  taskId         String
+  evidenceId     String
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  task         ResponseTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  evidence     Evidence     @relation(fields: [evidenceId], references: [id], onDelete: Restrict)
+
+  @@unique([taskId, evidenceId])
+}
+
+model InvestigationNote {
+  id             String   @id @default(cuid())
+  organizationId String
+  incidentId     String
+  authorId       String
+  text           String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  incident     Incident     @relation(fields: [incidentId], references: [id], onDelete: Restrict)
+
+  @@index([incidentId, createdAt])
+}
+
+/// mode: RULE_BASED | CLAUDE
+model InvestigationAnalysis {
+  id                  String   @id @default(cuid())
+  organizationId      String
+  incidentId          String
+  mode                String
+  generatedAt         DateTime @default(now())
+  summary             String
+  classificationHint  String?
+  factsJson           String
+  hypothesesJson      String
+  unknownsJson        String
+  recommendationsJson String
+  limitationsJson     String   @default("[]")
+  usedEvidenceIdsJson String
+  modelId             String?
+  /// Set when Claude was requested but failed and rule-based output was used instead.
+  errorStatus         String?
+  createdById         String?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  incident     Incident     @relation(fields: [incidentId], references: [id], onDelete: Restrict)
+
+  @@index([incidentId, generatedAt])
+}
+
+/// Immutable, versioned report snapshot. No update path exists in the service layer.
+model ReportSnapshot {
+  id             String   @id @default(cuid())
+  organizationId String
+  incidentId     String
+  version        Int
+  title          String
+  createdById    String
+  generatedAt    DateTime @default(now())
+  contentJson    String
+  contentSha256  String
+  contentHtml    String?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  incident     Incident     @relation(fields: [incidentId], references: [id], onDelete: Restrict)
+
+  @@unique([incidentId, version])
+  @@index([organizationId, generatedAt])
+}
+
+/// format: CSV | JSON ; mode: ATOMIC | PARTIAL ; outcome: COMPLETED | REJECTED
+model ImportJob {
+  id                String   @id @default(cuid())
+  organizationId    String
+  incidentId        String
+  filename          String
+  fileSha256        String
+  format            String
+  mode              String
+  outcome           String
+  totalRows         Int
+  acceptedCount     Int
+  rejectedCount     Int
+  duplicateCount    Int
+  errorsJson        String
+  createdById       String
+  createdAt         DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  incident     Incident     @relation(fields: [incidentId], references: [id], onDelete: Restrict)
+  evidence     Evidence[]
+}
+
+/// provider: MICROSOFT_GRAPH_SERVICE_HEALTH
+/// status: NOT_CONFIGURED | READY | SYNCING | CONNECTED | ERROR
+/// Secrets are never stored here: they live in server environment variables only.
+model ProviderConnection {
+  id             String    @id @default(cuid())
+  organizationId String
+  provider       String
+  status         String
+  lastSyncAt     DateTime?
+  lastAttemptAt  DateTime?
+  lastErrorCode  String?
+  metadataJson   String    @default("{}")
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, provider])
+}
+
+/// Tenant service-health issues retrieved by the read-only Microsoft Graph connector.
+model ProviderServiceIssue {
+  id                   String    @id @default(cuid())
+  organizationId       String
+  provider             String
+  externalId           String
+  service              String
+  title                String
+  status               String
+  classification       String?
+  impactDescription    String?
+  startDateTime        DateTime?
+  endDateTime          DateTime?
+  lastModifiedDateTime DateTime?
+  isResolved           Boolean   @default(false)
+  retrievedAt          DateTime
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, provider, externalId])
+}
+
+/// Append-only. The service layer exposes no update or delete for audit entries.
+model AuditEntry {
+  id             String   @id @default(cuid())
+  organizationId String
+  actorId        String?
+  /// Denormalised so the record survives user changes.
+  actorLabel     String?
+  action         String
+  entityType     String
+  entityId       String?
+  summary        String
+  metadataJson   String   @default("{}")
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, createdAt])
+}

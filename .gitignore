@@ -1,0 +1,25 @@
+# dependencies
+node_modules/
+# next
+.next/
+.next-dev/
+out/
+next-env.d.ts
+*.tsbuildinfo
+# env & local databases (never commit secrets or demo DBs)
+.env
+.env.local
+.env.*.local
+prisma/*.db
+prisma/*.db-journal
+*.db
+*.db-journal
+# test output
+coverage/
+test-results/
+playwright-report/
+blob-report/
+.vitest/
+# misc
+.DS_Store
+npm-debug.log*
