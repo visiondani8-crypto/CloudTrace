@@ -270,6 +270,18 @@ def build_timeline(
 
 # ----------------------------------------------------------------------------- brand kits
 
+def contrast_text(hex_bg: str) -> str:
+    """Black or white text, whichever reads better on the given background (WCAG luminance)."""
+    h = hex_bg.lstrip("#")
+    r, g, b = (int(h[i : i + 2], 16) / 255 for i in (0, 2, 4))
+
+    def lin(c: float) -> float:
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+
+    lum = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
+    return "#0B0E14" if lum > 0.45 else "#FFFFFF"
+
+
 def apply_brand_kit(tl: Timeline, kit: dict[str, Any]) -> Timeline:
     """Apply a brand kit to editable timeline properties (never to source media)."""
     d = kit.get("data", kit)
@@ -278,9 +290,12 @@ def apply_brand_kit(tl: Timeline, kit: dict[str, Any]) -> Timeline:
         cs.font = d["caption_font"]
         cs.weight = int(d.get("caption_weight", cs.weight))
     if d.get("primary_color"):
-        cs.active_color = d["primary_color"]
-        if cs.background in ("word_box",):
+        if cs.background == "word_box":
+            # Brand colour goes on the box; the active word keeps a contrasting text colour.
             cs.background_color = d["primary_color"]
+            cs.active_color = contrast_text(d["primary_color"])
+        else:
+            cs.active_color = d["primary_color"]
     if d.get("caption_color"):
         cs.color = d["caption_color"]
     if d.get("caption_preset"):
@@ -290,7 +305,11 @@ def apply_brand_kit(tl: Timeline, kit: dict[str, Any]) -> Timeline:
         tl.captions.words = keep_words
         cs = new
         if d.get("primary_color"):
-            cs.active_color = d["primary_color"]
+            if cs.background == "word_box":
+                cs.background_color = d["primary_color"]
+                cs.active_color = contrast_text(d["primary_color"])
+            else:
+                cs.active_color = d["primary_color"]
     for t in tl.texts:
         if d.get("heading_font"):
             t.style.font = d["heading_font"]

@@ -69,7 +69,10 @@ async def lifespan(app: FastAPI):
     mgr = get_manager()
     register_all(mgr)
     if app.state.start_workers:
-        mgr.start()
+        from ..settings_service import get_settings
+
+        perf = get_settings().get("performance", {})
+        mgr.start(render_workers=int(perf.get("render_workers") or 0) or None)
     log.info("ClipForge Studio backend ready at http://%s:%s (data: %s)", get_config().host, get_config().port, get_config().data_dir)
     yield
     mgr.stop()

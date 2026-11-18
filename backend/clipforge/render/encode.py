@@ -63,7 +63,7 @@ def resolve_settings(s: ExportSettings) -> ExportSettings:
     return s.model_copy(update=upd)
 
 
-def output_dims(tl: Timeline, s: ExportSettings, info: dict[str, Any]) -> tuple[int, int, dict[str, Any]]:
+def output_dims(tl: Timeline, s: ExportSettings, info: dict[str, Any]) -> tuple[int, int, dict[str, Any]]:  # noqa: C901
     """Compute output size. Never silently downscale; refuse unrequested upscaling.
 
     Returns (width, height, report) where report explains the effective source
@@ -80,28 +80,41 @@ def output_dims(tl: Timeline, s: ExportSettings, info: dict[str, Any]) -> tuple[
     if panel:
         pa = (panel.rect[2] * cw) / max(1e-6, panel.rect[3] * ch)
     bw, bh = base_crop(sw, sh, pa)
+    # Base framing (keyframes) decides resolution/upscale blocking; punch-in effects are transient and
+    # are reported as the peak magnification.
     max_zoom = max((k.zoom for p in tl.reframe.panels for k in p.keyframes), default=1.0)
-    eff_h = bh / max(1.0, max_zoom) / (panel.rect[3] if panel else 1.0)
+    eff_zoom = max((float(e.params.get(k, 1.0)) for c in tl.clips for e in c.effects if e.type == "zoom" and e.enabled
+                    for k in ("from", "to")), default=1.0)
+    frac = panel.rect[3] if panel else 1.0
+    # Canvas height at which one source pixel maps to one output pixel (zoom < 1 = Smart Fill shows the whole frame).
+    eff_h = bh / max_zoom / frac
+    peak_eff_h = bh / (max_zoom * max(1.0, eff_zoom)) / frac
     if s.resolution == "source":
-        short = int(min(eff_h * aspect, eff_h)) if aspect < 1 else int(eff_h)
-        short = max(240, short - short % 2)
+        short = int(eff_h * aspect) if aspect < 1 else int(eff_h)
+        short = min(2160, max(240, short - short % 2))  # "Match Source" never exceeds 4K-class output
     else:
-        short = RES_SHORT_SIDE[s.resolution]
+        short = RES_SHORT_SIDE[s.resolution or resolve_settings(s).resolution or "1080p"]
     if aspect >= 1:
         h = short
         w = int(round(h * aspect / 2) * 2)
     else:
         w = short
         h = int(round(w / aspect / 2) * 2)
-    out_h_equiv = h
-    upscale = out_h_equiv / eff_h if eff_h > 0 else 1.0
+    upscale = h / eff_h if eff_h > 0 else 1.0
+    peak = h / peak_eff_h if peak_eff_h > 0 else upscale
+    if upscale > 1.05:
+        msg = (f"The visible crop contains ~{eff_h:.0f} source lines; output {w}×{h} is a {upscale:.2f}× upscale. "
+               "Upscaling does not add detail.")
+    else:
+        msg = f"Output {w}×{h} is at or below source detail (~{eff_h:.0f} lines): no upscaling."
+    if peak > upscale * 1.02:
+        msg += f" Punch-in zooms briefly magnify up to {peak:.2f}×."
     report = {
         "effective_source_height": round(eff_h),
         "upscale_factor": round(upscale, 2),
+        "peak_upscale_factor": round(peak, 2),
         "is_upscaled": upscale > 1.05,
-        "message": (f"The visible crop contains ~{eff_h:.0f} source lines; output {w}×{h} is a {upscale:.2f}× upscale. "
-                    "Upscaling does not add detail.") if upscale > 1.05 else
-                   (f"Output {w}×{h} is at or below source detail (~{eff_h:.0f} lines): no upscaling."),
+        "message": msg,
     }
     return w, h, report
 

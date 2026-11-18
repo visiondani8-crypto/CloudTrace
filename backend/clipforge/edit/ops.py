@@ -178,6 +178,8 @@ def caption_layout(tl: Timeline) -> list[dict[str, Any]]:
         w["disp"] = t
     max_words = 1 if cs.mode == "word" else cs.max_words
     slot = max(1.0, cs.active_scale) if cs.mode == "highlight" else 1.0
+    if cs.background == "word_box" and cs.mode == "highlight":
+        slot = max(slot, 1.14)  # leave room for the box padding between words
     pages: list[list[dict[str, Any]]] = []
     cur: list[dict[str, Any]] = []
     for w in words:

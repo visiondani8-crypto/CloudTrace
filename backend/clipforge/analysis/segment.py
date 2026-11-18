@@ -9,7 +9,7 @@ from typing import Any
 import numpy as np
 
 from ..media.audio import ANALYSIS_SR, load_wav_segment
-from .text import TfIdf, cosine, keyphrases, title_case
+from .text import TfIdf, cosine, is_topic_phrase, keyphrases, title_case
 
 _ABBREV = re.compile(r"\b(mr|mrs|ms|dr|prof|st|vs|etc|e\.g|i\.e|inc|ltd|jr|sr|no|vol|approx)\.$", re.I)
 _END = re.compile(r"[.!?]+[\"')\]]*$")
@@ -126,7 +126,8 @@ def topic_segments(sentences: list[dict[str, Any]], tfidf: TfIdf, min_seconds: f
 
 def _mk_topic(i: int, j: int, sentences, tfidf: TfIdf, k: int) -> dict[str, Any]:
     texts = [s["text"] for s in sentences[i : j + 1]]
-    kp = keyphrases(texts, tfidf, top=4)
+    kp_all = keyphrases(texts, tfidf, top=8)
+    kp = [k for k in kp_all if is_topic_phrase(k)][:4] or kp_all[:4]
     return {
         "id": k,
         "s0": i,

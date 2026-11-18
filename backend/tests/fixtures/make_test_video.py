@@ -141,7 +141,7 @@ def build(out_dir: Path, short: bool = False) -> dict:
         # Background: one colour segment per topic → real scene cuts.
         bg_inputs = []
         filters = []
-        for k, tp in enumerate(topics):
+        for tp in topics:
             d = tp["end"] - tp["start"]
             bg_inputs += ["-f", "lavfi", "-i", f"color=c={tp['colour']}:s={W}x{H}:r={FPS}:d={d:.3f}"]
         n = len(topics)

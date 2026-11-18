@@ -25,8 +25,9 @@ def sanitize_filename(name: str, max_len: int = 120, default: str = "file") -> s
     """Return a filesystem-safe file name (no directories, no traversal)."""
     name = unicodedata.normalize("NFKD", name or "")
     name = name.replace("/", "_").replace("\\", "_").replace("\x00", "")
-    name = _FILENAME_SAFE.sub("_", name).strip(" .")
-    name = re.sub(r"_+", "_", name)
+    name = _FILENAME_SAFE.sub("_", name)
+    name = re.sub(r"\.{2,}", "", name)  # no ".." anywhere
+    name = re.sub(r"_+", "_", name).strip(" ._")
     if not name or name in {".", ".."}:
         name = default
     if len(name) > max_len:

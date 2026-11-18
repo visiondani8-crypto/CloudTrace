@@ -50,14 +50,13 @@ def _output_path(folder: Path, base: str, ext: str) -> Path:
 
 
 def _check_specs(ops: list[dict[str, Any]], scale: float) -> list[dict[str, Any]]:
-    """Pick moments to verify overlays survived into the encoded file."""
+    """Pick moments to verify overlays survived into the encoded file.
+
+    One check for captions, one per distinct text layer (up to 3) and one for vector graphics.
+    """
     specs = []
-    for label, pred in (("captions", lambda o: o["k"] == "text" and o["l"] == 2),
-                        ("text", lambda o: o["k"] == "text" and o["l"] >= 4),
-                        ("graphics", lambda o: o["k"] in ("rect", "ellipse", "arrow") and o["l"] == 3 and not o.get("grow"))):
-        op = next((o for o in ops if pred(o) and o["t1"] - o["t0"] > 0.25), None)
-        if not op:
-            continue
+
+    def spec(label: str, op: dict[str, Any]) -> None:
         t = op["t0"] + min(0.6, (op["t1"] - op["t0"]) / 2)
         if op["k"] == "text":
             w = max(op["size"], len(op["text"]) * op["em"] * 0.55)
@@ -65,6 +64,23 @@ def _check_specs(ops: list[dict[str, Any]], scale: float) -> list[dict[str, Any]
         else:
             bbox = [op["x"], op["y"], op["x"] + op["w"], op["y"] + op["h"]]
         specs.append({"label": label, "t": t, "bbox": [v * scale for v in bbox]})
+
+    cap = next((o for o in ops if o["k"] == "text" and o["l"] == 2 and o["t1"] - o["t0"] > 0.25), None)
+    if cap:
+        spec("captions", cap)
+    seen: set[tuple[int, int]] = set()
+    for o in ops:
+        if o["k"] == "text" and o["l"] >= 4 and o["t1"] - o["t0"] > 0.25:
+            key = (int(o["x"]), int(o["y"]))
+            if key in seen:
+                continue
+            seen.add(key)
+            spec("text" if len(seen) == 1 else f"text_{len(seen)}", o)
+            if len(seen) >= 3:
+                break
+    gfx = next((o for o in ops if o["k"] in ("rect", "ellipse", "arrow") and o["l"] == 3 and not o.get("grow") and o["t1"] - o["t0"] > 0.25), None)
+    if gfx:
+        spec("graphics", gfx)
     return specs
 
 

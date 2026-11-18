@@ -21,7 +21,7 @@ from typing import Any
 import numpy as np
 
 from .modes import FACTOR_LABELS, FACTORS, MODES, PLATFORMS, Instructions, ModeConfig
-from .text import TfIdf, cosine, keyphrases, title_case, truncate_words
+from .text import TfIdf, cosine, is_topic_phrase, keyphrases, title_case, truncate_words
 
 DURATION_PRESETS = {
     "10-20": (10.0, 20.0),
@@ -522,7 +522,8 @@ def guess_audience(terms: set[str], mode: ModeConfig) -> str:
 def explain(c: dict[str, Any], sentences, tfidf: TfIdf, mode: ModeConfig) -> dict[str, Any]:
     i, j = c["s0"], c["s1"]
     texts = [s["text"] for s in sentences[i : j + 1]]
-    kp = keyphrases(texts, tfidf, top=4)
+    kp_all = keyphrases(texts, tfidf, top=8)
+    kp = [k for k in kp_all if is_topic_phrase(k)][:4] or kp_all[:4]
     first = sentences[i]["text"].strip()
     title = _make_title(sentences, i, j, kp)
     terms = {t for k in range(i, j + 1) for t in tfidf.doc_terms[k]}

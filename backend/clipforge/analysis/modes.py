@@ -226,7 +226,8 @@ def parse_instructions(text: str) -> Instructions:
         ins.count = max(1, min(50, int(m.group(1))))
         ins.notes.append(f"{ins.count} clips")
     # avoid clauses are parsed first so themes inside them don't count as boosts
-    avoid_spans = [mm.span() for mm in re.finditer(r"\b(avoid|without|no|skip|exclude|don't include|not about)\b[^.,;]*", t)]
+    avoid_spans = [mm.span() for mm in re.finditer(
+        r"\b(avoid|without|no|skip|exclude|don't include|do not include|not about|nothing about|nothing on|never|don't want|do not want)\b[^.,;]*", t)]
 
     def _in_avoid(pos: int) -> bool:
         return any(a <= pos < b for a, b in avoid_spans)
@@ -253,7 +254,7 @@ def parse_instructions(text: str) -> Instructions:
             ins.prefer_single_speaker = True
             ins.notes.append("Preferring single-speaker passages")
         else:
-            words = re.sub(r"^\W*(avoid|without|no|skip|exclude|don't include|not about)\b", "", clause)
+            words = re.sub(r"^\W*(avoid|without|no|skip|exclude|don't include|do not include|not about|nothing about|nothing on|never|don't want|do not want)\b", "", clause)
             words = re.sub(r"\b(clips?|moments?|parts?|sections?|anything|about|that|with|the|mention\w*|talk\w*)\b", " ", words)
             terms = [stem(w) for w in re.findall(r"[a-z]{3,}", words)]
             if terms:

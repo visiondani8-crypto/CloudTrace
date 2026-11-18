@@ -1,0 +1,22 @@
+@import "@fontsource/inter/400.css";
+@import "@fontsource/inter/500.css";
+@import "@fontsource/inter/600.css";
+@import "@fontsource/inter/700.css";
+@import "@fontsource/space-grotesk/500.css";
+@import "@fontsource/space-grotesk/600.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: dark; }
+html, body, #root { height: 100%; }
+body { font-feature-settings: "cv11", "ss01"; font-size: 14px; }
+* { scrollbar-width: thin; scrollbar-color: #303848 transparent; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: #303848; border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+::selection { background: rgba(91, 140, 255, 0.35); }
+:focus-visible { outline: none; }
+.tabular { font-variant-numeric: tabular-nums; }
+input[type="range"] { accent-color: #5B8CFF; }
+.checker { background-image: conic-gradient(#1b2030 25%, #151924 0 50%, #1b2030 0 75%, #151924 0); background-size: 16px 16px; }

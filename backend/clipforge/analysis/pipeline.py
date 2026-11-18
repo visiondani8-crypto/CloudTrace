@@ -33,7 +33,7 @@ from . import highlights as hl
 from .features import sentence_features
 from .modes import MODES, PLATFORMS, parse_instructions
 from .segment import build_sentences, speaker_turns, topic_segments
-from .text import TfIdf, keyphrases
+from .text import TfIdf, is_topic_phrase, keyphrases
 
 log = logging.getLogger(__name__)
 
@@ -181,7 +181,7 @@ def run_analysis(project_id: str, source_id: str, settings: AnalysisSettings, ct
     instructions = parse_instructions(settings.custom_instructions)
     feats = sentence_features(sentences, tfidf, media["audio"], visual, topics, speakers, instructions)
     summary = {
-        "keywords": keyphrases([s["text"] for s in sentences], tfidf, top=12),
+        "keywords": [k for k in keyphrases([s["text"] for s in sentences], tfidf, top=20) if is_topic_phrase(k)][:12],
         "topics": [{k: t[k] for k in ("id", "start", "end", "label", "keywords")} for t in topics],
         "questions": sum(1 for s in sentences if s["is_question"]),
         "stories": sum(1 for f in feats if f["cues"].get("story")),
