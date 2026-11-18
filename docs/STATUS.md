@@ -9,7 +9,7 @@ Status legend:
 
 Test evidence (latest run, Linux container, 4 vCPU, FFmpeg 6.1):
 
-- **Backend:** `pytest`: 41 tests (29 unit/API/job-queue + 12 real-media video tests) pass with faster-whisper. The video suite also passes with the offline pocketsphinx engine.
+- **Backend:** `pytest`: 40 tests (28 unit/API/job-queue + 12 real-media video tests) pass with faster-whisper. The video suite also passes with the offline pocketsphinx engine.
 - **Frontend:** `tsc` clean; `vitest`: 18 tests (geometry parity with Python, editor store, UI interactions).
 - **End to end:** `e2e/workflow.e2e.mjs` drives a real browser against the real backend: import → analyse → highlights → preview → editor → subtitle edit → text overlay → save → exact frame → render → ffprobe/browser playback → social package → ZIP → reload. Ten steps, no console errors.
 - **Additional recorded verifications:** a batch job (analyse → 3 branded edits → 3 validated renders); Regenerate Edit and versions; hook apply; SRT import; split/fill/speaker reframing; HEVC split-screen with music ducking; ProRes archival; all 10 caption presets through the exporter; job pause and resume.
