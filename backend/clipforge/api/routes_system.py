@@ -413,3 +413,49 @@ def cleanup(body: CleanupIn):
                         s.add(src)
                 s.commit()
     return {"freed_bytes": freed, "freed": human_bytes(freed)}
+
+
+# ----------------------------------------------------------------------------- personal tuning
+class TuningLearnIn(BaseModel):
+    content_mode: str
+
+
+class TuningToggleIn(BaseModel):
+    content_mode: str
+    enabled: bool
+
+
+@router.get("/tuning")
+def tuning_status():
+    from ..analysis import tuning
+
+    return tuning.status()
+
+
+@router.post("/tuning/learn")
+def tuning_learn(body: TuningLearnIn):
+    from ..analysis import tuning
+
+    try:
+        return tuning.learn_and_store(body.content_mode)
+    except tuning.TuningError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@router.post("/tuning/enabled")
+def tuning_enabled(body: TuningToggleIn):
+    from ..analysis import tuning
+
+    try:
+        tuning.set_enabled(body.content_mode, body.enabled)
+    except tuning.TuningError as e:
+        raise HTTPException(400, str(e)) from e
+    return tuning.status()["modes"][body.content_mode]
+
+
+@router.delete("/tuning/{mode}")
+def tuning_reset(mode: str):
+    from ..analysis import tuning
+
+    tuning.reset(mode)
+    return tuning.status()["modes"].get(mode, {})

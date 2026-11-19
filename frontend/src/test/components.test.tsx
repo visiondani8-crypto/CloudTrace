@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -10,6 +10,7 @@ import { useEditor } from "@/editor/store";
 import HighlightsPage from "@/pages/HighlightsPage";
 import NewProjectPage from "@/pages/NewProjectPage";
 import ExportCentre from "@/pages/ExportCentre";
+import { TuningPanel } from "@/pages/TuningPanel";
 import { makeTimeline } from "./fixtures";
 import type { Job } from "@/lib/types";
 
@@ -97,6 +98,38 @@ describe("UI interactions", () => {
       const c = calls.find((x) => x.url === "/api/projects/p1/prepare-edits");
       expect(c?.body.highlight_ids).toEqual(["h2"]);
     });
+    // Rate a clip: thumbs up, then clicking again clears it.
+    const card = screen.getAllByTestId("highlight-card")[1];
+    const good = card.querySelector('[aria-label="Good clip"]') as HTMLButtonElement;
+    fireEvent.click(good);
+    await waitFor(() => expect(calls.some((c) => c.url === "/api/highlights/h2" && c.body?.rating === 1)).toBe(true));
+    await waitFor(() => expect(good.getAttribute("aria-pressed")).toBe("true"));
+    fireEvent.click(good);
+    await waitFor(() => expect(calls.some((c) => c.url === "/api/highlights/h2" && c.body?.rating === 0)).toBe(true));
+  });
+
+  it("personal tuning: learn from ratings and show held-out accuracy", async () => {
+    const defaults = { coherence: 25, hook: 20, payoff: 15, clarity: 10, visual: 10, novelty: 10, platform: 10 };
+    const learned = { ...defaults, coherence: 18, hook: 27 };
+    let state: any = { label: "Podcast", ratings: { good: 9, bad: 6 }, can_learn: true, defaults, learned: null, enabled: false };
+    const gamingMode = { label: "Gaming", ratings: { good: 1, bad: 0 }, can_learn: false, defaults, learned: null, enabled: false };
+    routes["GET /api/tuning"] = () => ({ modes: { podcast: state, gaming: gamingMode }, min_ratings: 10, min_per_class: 3 });
+    routes["POST /api/tuning/learn"] = () => {
+      state = { ...state, enabled: true, learned: { content_mode: "podcast", weights: learned, defaults, ratings: { good: 9, bad: 6 }, recommended: true,
+        train_accuracy: { default: 0.6, learned: 0.7 }, cv_accuracy: { default: 0.55, learned: 0.68, folds: 3, held_out: 15 }, learned_at: 0 } };
+      return state;
+    };
+    wrap(<TuningPanel />);
+    const gaming = await screen.findByTestId("tuning-gaming");
+    expect(gaming.querySelector("button")!.hasAttribute("disabled")).toBe(true);
+    expect(gaming.textContent).toContain("Needs 10+ rated clips");
+    fireEvent.click(within(screen.getByTestId("tuning-podcast")).getByRole("button", { name: "Learn from my ratings" }));
+    await waitFor(() => expect(calls.some((c) => c.url === "/api/tuning/learn" && c.body?.content_mode === "podcast")).toBe(true));
+    expect(await screen.findByText("Learned weights on")).toBeInTheDocument();
+    const pod = screen.getByTestId("tuning-podcast");
+    expect(pod.textContent).toContain("default 55%");
+    expect(pod.textContent).toContain("learned 68%");
+    expect(pod.textContent).toContain("27 pts (+7)");
   });
 
   it("creates a project and uploads a dropped file", async () => {

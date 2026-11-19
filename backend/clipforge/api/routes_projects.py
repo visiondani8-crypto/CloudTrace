@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, PlainTextResponse
@@ -453,6 +453,7 @@ def list_highlights(pid: str):
 
 class HighlightPatch(BaseModel):
     selected: bool | None = None
+    rating: Literal[-1, 0, 1] | None = None
     title: str | None = Field(default=None, max_length=200)
     start: float | None = None
     end: float | None = None
@@ -466,6 +467,8 @@ def patch_highlight(hid: str, body: HighlightPatch):
             raise HTTPException(404, "Highlight not found")
         if body.selected is not None:
             h.selected = body.selected
+        if body.rating is not None:
+            h.rating = body.rating
         if body.title is not None:
             h.title = body.title
         if body.start is not None or body.end is not None:

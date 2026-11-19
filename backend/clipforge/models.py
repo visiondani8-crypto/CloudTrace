@@ -102,6 +102,7 @@ class Highlight(SQLModel, table=True):
     transcript: str = ""
     thumb_path: str | None = None
     selected: bool = False
+    rating: int = Field(default=0, index=True)  # user feedback: +1 good clip, -1 bad clip, 0 unrated
     created_at: datetime = Field(default_factory=utcnow)
 
 

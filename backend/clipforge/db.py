@@ -39,9 +39,18 @@ def _migration_2(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS ix_renders_status ON renders (status)")
 
 
+def _migration_3(conn: sqlite3.Connection) -> None:
+    """Highlight ratings (thumbs up/down) for personal tuning."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(highlights)")}
+    if "rating" not in cols:  # fresh databases already have it from create_all
+        conn.execute("ALTER TABLE highlights ADD COLUMN rating INTEGER NOT NULL DEFAULT 0")
+    conn.execute("CREATE INDEX IF NOT EXISTS ix_highlights_rating ON highlights (rating)")
+
+
 MIGRATIONS: list[tuple[int, Callable[[sqlite3.Connection], None]]] = [
     (1, _migration_1),
     (2, _migration_2),
+    (3, _migration_3),
 ]
 SCHEMA_VERSION = MIGRATIONS[-1][0]
 

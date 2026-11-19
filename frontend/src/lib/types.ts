@@ -349,6 +349,7 @@ export interface Highlight {
   transcript: string;
   thumb_url?: string | null;
   selected: boolean;
+  rating?: number;
   edits?: { id: string; style: string; version: number; aspect: string }[];
 }
 
@@ -452,3 +453,26 @@ export interface DrawOp {
   asset_id?: string;
   anim?: { alpha?: [number, number][]; scale?: [number, number][]; move?: [number, number, number] };
 }
+
+export interface TuningResult {
+  content_mode: string;
+  weights: Record<string, number>;
+  defaults: Record<string, number>;
+  ratings: { good: number; bad: number };
+  train_accuracy: { default: number | null; learned: number | null };
+  cv_accuracy: { default: number | null; learned: number | null; folds: number; held_out: number };
+  recommended: boolean;
+  learned_at: number;
+  changes?: string[];
+}
+
+export interface TuningMode {
+  label: string;
+  ratings: { good: number; bad: number };
+  can_learn: boolean;
+  defaults: Record<string, number>;
+  learned: TuningResult | null;
+  enabled: boolean;
+}
+
+export interface TuningStatus { modes: Record<string, TuningMode>; min_ratings: number; min_per_class: number }

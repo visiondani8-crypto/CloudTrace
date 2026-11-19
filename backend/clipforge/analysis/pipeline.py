@@ -211,8 +211,17 @@ def run_analysis(project_id: str, source_id: str, settings: AnalysisSettings, ct
         hi = lo + 10
     platform = settings.platforms[0]
     mode_key = settings.content_mode
+    # Weights: explicit per-analysis weights > the user's learned weights for this mode > mode defaults.
+    weights, weights_source = settings.factor_weights, "custom" if settings.factor_weights else "default"
+    if weights is None:
+        from .tuning import active_weights
+
+        learned = active_weights(mode_key)
+        if learned:
+            weights, weights_source = learned, "learned"
+            ctx.info("Using your learned scoring weights for this content mode")
     sctx = hl.make_context(mode_key, instructions, platform, lo, hi, transcript.get("has_punctuation", True),
-                           (speakers or {}).get("confidence", 0.0), settings.factor_weights)
+                           (speakers or {}).get("confidence", 0.0), weights)
     words_by_sentence = _words_by_sentence(transcript, sentences)
     cands = hl.generate_candidates(sentences, duration, visual["scene_cuts"], lo, hi, fast=mp["fast_candidates"])
     ctx.info(f"Generated {len(cands)} candidate windows ({lo:.0f}–{hi:.0f}s)")
@@ -297,6 +306,7 @@ def run_analysis(project_id: str, source_id: str, settings: AnalysisSettings, ct
         "candidates": [{k: c[k] for k in ("s0", "s1", "start", "end", "duration", "score", "issues")} for c in top],
         "elapsed_s": round(time.time() - t_start, 1),
         "scoring_weights": sctx.factor_max,
+        "weights_source": weights_source,
     }
     atomic_write_json(pdir / "analysis" / f"{analysis_id}.json", doc)
     with session_scope() as s:

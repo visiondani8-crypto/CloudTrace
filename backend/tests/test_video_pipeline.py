@@ -333,3 +333,34 @@ def test_llm_refinement_and_social_copy_through_provider_protocols(analysed, pro
     assert "73%" not in c["titles"][2]["text"] and any("73%" in i for i in c["grounding"]["issues"])  # unsupported figure removed
     assert c["hashtags"][:2] == ["#SavingTips", "#money"]  # sanitised and de-duplicated
     assert not any("viral" in s.lower() for s in c["suggestions"])
+
+
+# ----------------------------------------------------------------------------- evaluation harness (keep last: re-analyses the source)
+def test_evaluation_harness_cli(analysed, env, tmp_path, capsys):
+    """Golden clips = the generated podcast's topic segments (known ground truth)."""
+    import json
+
+    from clipforge.devtools.evaluate import main
+
+    topics = [t for t in analysed["manifest"]["topics"] if 12 <= t["end"] - t["start"] <= 35]
+    golden = tmp_path / "podcast.json"
+    golden.write_text(json.dumps({"video": analysed["manifest"]["video"], "content_mode": "podcast", "min_duration": 10,
+                                  "max_duration": 35, "clips": [{"start": t["start"], "end": t["end"]} for t in topics]}))
+    out = tmp_path / "report.json"
+    # 1) Score the existing project's highlights.
+    assert main([str(golden), "--project", analysed["pid"], "--json", str(out), "--quiet"]) == 0
+    rep = json.loads(out.read_text())["variants"]["project highlights"]["per_video"][0]
+    assert rep["golden"] == len(topics) and rep["predictions"] == len(analysed["highlights"])
+    assert rep["recall"] >= 0.5, rep  # most topic segments are recovered as highlights
+    assert rep["start_error_s"] is not None and rep["start_error_s"] < 3.0
+    # 2) Analyse through the harness (cached) with default vs custom weights.
+    args = [str(golden), "--data-dir", str(env), "--engine", ENGINE, "--compare", "--weights", "hook=60", "--json", str(out), "--quiet"]
+    if WHISPER:
+        args += ["--whisper-model", WHISPER]
+    assert main(args) == 0
+    variants = json.loads(out.read_text())["variants"]
+    assert set(variants) == {"default weights", "custom weights"}
+    for v in variants.values():
+        assert 0 <= v["aggregate"]["precision"] <= 1 and v["aggregate"]["golden"] == len(topics)
+    printed = capsys.readouterr().out
+    assert "default weights" in printed and "AP" in printed

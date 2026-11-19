@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ChevronDown, ChevronUp, Clapperboard, Pause, Play, Scissors, Send, Sparkles } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronUp, Clapperboard, Pause, Play, Scissors, Send, Sparkles, ThumbsDown, ThumbsUp } from "lucide-react";
 import { errorMessage, get, patch, post } from "@/lib/api";
 import type { Edit, Highlight, Job, Project } from "@/lib/types";
 import { dur, STYLE_LABELS, tc } from "@/lib/format";
@@ -37,8 +37,29 @@ function Breakdown({ h }: { h: Highlight }) {
   );
 }
 
-function HighlightCard({ h, selected, onSelect, onPlay, playing, onOpen, onExport, busy }: {
-  h: Highlight; selected: boolean; onSelect: (v: boolean) => void; onPlay: () => void; playing: boolean; onOpen: () => void; onExport: () => void; busy: boolean;
+function RateButtons({ rating, onRate }: { rating: number; onRate: (v: -1 | 0 | 1) => void }) {
+  const btn = (v: -1 | 1, Icon: typeof ThumbsUp, label: string) => (
+    <button
+      onClick={() => onRate(rating === v ? 0 : v)}
+      aria-pressed={rating === v}
+      aria-label={label}
+      title={`${label} — your ratings can tune scoring (Settings → Personal tuning)`}
+      className={cn("rounded p-1 transition-colors", rating === v ? (v > 0 ? "bg-ok/15 text-ok" : "bg-err/15 text-err") : "text-muted hover:bg-raised hover:text-fg")}
+    >
+      <Icon className="h-3.5 w-3.5" />
+    </button>
+  );
+  return (
+    <div className="flex items-center gap-0.5" data-testid="rate-buttons">
+      {btn(1, ThumbsUp, "Good clip")}
+      {btn(-1, ThumbsDown, "Bad clip")}
+    </div>
+  );
+}
+
+function HighlightCard({ h, selected, onSelect, onPlay, playing, onOpen, onExport, onRate, busy }: {
+  h: Highlight; selected: boolean; onSelect: (v: boolean) => void; onPlay: () => void; playing: boolean; onOpen: () => void; onExport: () => void;
+  onRate: (v: -1 | 0 | 1) => void; busy: boolean;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -80,7 +101,8 @@ function HighlightCard({ h, selected, onSelect, onPlay, playing, onOpen, onExpor
         <button onClick={() => setOpen(!open)} className="flex min-w-0 items-center gap-1 truncate text-left text-2xs text-sub hover:text-fg">
           {open ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />} Why this score · audience: {h.audience}
         </button>
-        <div className="flex gap-1.5">
+        <div className="flex items-center gap-1.5">
+          <RateButtons rating={h.rating ?? 0} onRate={onRate} />
           <Button size="sm" variant="ghost" icon={<Send className="h-3.5 w-3.5" />} onClick={onExport} disabled={busy}>Export</Button>
           <Button size="sm" variant="primary" icon={<Scissors className="h-3.5 w-3.5" />} onClick={onOpen} loading={busy} data-testid="open-editor">Open Editor</Button>
         </div>
@@ -125,6 +147,14 @@ export default function HighlightsPage() {
     v ? n.add(id) : n.delete(id);
     setSel(n);
     patch(`/highlights/${id}`, { selected: v }).catch(() => {});
+  };
+
+  const rate = (id: string, v: -1 | 0 | 1) => {
+    qc.setQueryData<Highlight[]>(["highlights", pid], (old) => old?.map((h) => (h.id === id ? { ...h, rating: v } : h)));
+    patch(`/highlights/${id}`, { rating: v }).catch((e) => {
+      toast({ tone: "err", text: `Could not save rating: ${errorMessage(e)}` });
+      qc.invalidateQueries({ queryKey: ["highlights", pid] });
+    });
   };
 
   const play = (h: Highlight) => {
@@ -180,7 +210,7 @@ export default function HighlightsPage() {
     <div className="mx-auto max-w-[1280px] px-8 py-7">
       <PageHeader
         title="AI Highlights"
-        sub={project ? `${project.name} · ${hls?.length ?? 0} recommended clip(s) from ${sel_?.candidates ?? "?"} candidates` : ""}
+        sub={project ? `${project.name} · ${hls?.length ?? 0} recommended clip(s) from ${sel_?.candidates ?? "?"} candidates${analysis?.weights_source === "learned" ? " · scored with your learned weights" : ""}` : ""}
         actions={
           <>
             <Button variant="outline" onClick={() => nav(`/projects/${pid}`)}>Analysis settings</Button>
@@ -232,7 +262,7 @@ export default function HighlightsPage() {
             {list.map((h) => (
               <div id={`hl-${h.id}`} key={h.id}>
                 <HighlightCard h={h} selected={sel.has(h.id)} onSelect={(v) => toggle(h.id, v)} onPlay={() => play(h)} playing={playing === h.id}
-                  onOpen={() => openEditor(h, "editor")} onExport={() => openEditor(h, "export")} busy={busyId === h.id} />
+                  onOpen={() => openEditor(h, "editor")} onExport={() => openEditor(h, "export")} onRate={(v) => rate(h.id, v)} busy={busyId === h.id} />
               </div>
             ))}
           </div>

@@ -4,6 +4,7 @@ import { CheckCircle2, KeyRound, ShieldCheck, Trash2, XCircle } from "lucide-rea
 import { errorMessage, get, patch, post, put } from "@/lib/api";
 import { MODE_LABELS, PLATFORM_LABELS, STYLE_LABELS } from "@/lib/format";
 import { Alert, Badge, Button, Card, CardHeader, Field, Input, NativeSelect, PageHeader, Spinner, Switch, Tab, TabList, TabPanel, Tabs, useToast } from "@/components/ui";
+import { TuningPanel } from "./TuningPanel";
 
 export default function SettingsPage() {
   const qc = useQueryClient();
@@ -31,7 +32,7 @@ export default function SettingsPage() {
       <PageHeader title="Settings" sub={`Data folder: ${s.data_dir}`} actions={<Button variant="primary" loading={save.isPending} onClick={() => save.mutate()}>Save settings</Button>} />
       <Tabs defaultValue="general">
         <TabList className="mb-4">
-          {["general", "transcription", "ai", "export", "storage", "privacy", "shortcuts", "diagnostics"].map((t) => <Tab key={t} value={t}>{t === "ai" ? "AI providers" : t[0].toUpperCase() + t.slice(1)}</Tab>)}
+          {["general", "transcription", "ai", "tuning", "export", "storage", "privacy", "shortcuts", "diagnostics"].map((t) => <Tab key={t} value={t}>{t === "ai" ? "AI providers" : t === "tuning" ? "Personal tuning" : t[0].toUpperCase() + t.slice(1)}</Tab>)}
         </TabList>
         <TabPanel value="general">
           <Card><CardHeader title="Defaults for new projects" />
@@ -126,6 +127,9 @@ export default function SettingsPage() {
               <p className="text-2xs text-muted">Clearing the analysis cache means transcripts and visual analysis are recomputed on the next analysis.</p>
             </div>
           </Card>
+        </TabPanel>
+        <TabPanel value="tuning">
+          <TuningPanel />
         </TabPanel>
         <TabPanel value="privacy">
           <Card><CardHeader title={<span className="flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-ok" />Privacy</span>} />
