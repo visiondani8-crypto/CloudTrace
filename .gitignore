@@ -22,3 +22,4 @@ frontend/playwright-report/
 backend/tests/_artifacts/
 e2e-artifacts/
 .DS_Store
+*.tsbuildinfo

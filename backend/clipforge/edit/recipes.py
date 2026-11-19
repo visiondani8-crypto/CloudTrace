@@ -72,6 +72,16 @@ def canvas_for(aspect: str, info: dict[str, Any], platform: str | None = None, f
     if aspect in ("16:9", "source") and w > h:
         safe = {"top": 0.06, "bottom": 0.08, "left": 0.05, "right": 0.05}
     src_fps = info.get("fps") or 30.0
+    if info.get("variable_frame_rate"):
+        # VFR: conform to the nominal rate (r_frame_rate), not the average, snapped to a standard rate.
+        from fractions import Fraction
+
+        try:
+            nominal = float(Fraction(info.get("r_frame_rate") or "0/1"))
+        except (ValueError, ZeroDivisionError):
+            nominal = 0.0
+        ref = nominal if 10 <= nominal <= 120 else src_fps
+        src_fps = min((24.0, 25.0, 30.0, 50.0, 60.0), key=lambda r: abs(r - ref))
     out_fps = fps or (round(src_fps) if abs(src_fps - round(src_fps)) < 0.02 else round(src_fps, 3))
     out_fps = min(out_fps, 60)
     return Canvas(aspect=aspect, width=w, height=h, fps=float(out_fps), safe_area=safe)

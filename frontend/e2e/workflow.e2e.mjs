@@ -4,6 +4,7 @@
 //   4 preview a clip            5 open in editor     6 modify subtitles
 //   7 add a text overlay        8 render an MP4      9 reopen & play it (+ ffprobe)
 //  10 social metadata, package, and persistence after reload
+//  11 live preview vs exporter: crossfade, B-roll and music playback
 //
 // Usage: node e2e/workflow.e2e.mjs   (env CLIPFORGE_WHISPER_MODEL optional)
 import { createRequire } from "node:module";
@@ -210,6 +211,103 @@ try {
     const txtCount = await page.getByTestId("timeline-text").count();
     assert(txtCount >= 1, "text layer missing after reload");
     await shot("10-reopened-editor");
+  });
+  await step("11. Live preview matches the exporter (crossfade, B-roll, music)", async () => {
+    const broll = path.join(ART, "broll.mp4");
+    const music = path.join(ART, "music.wav");
+    execFileSync("ffmpeg", ["-nostdin", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=s=640x360:r=30:d=3",
+      "-c:v", "libx264", "-pix_fmt", "yuv420p", "-movflags", "+faststart", broll]);
+    execFileSync("ffmpeg", ["-nostdin", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "sine=f=330:d=12", "-ac", "2", music]);
+    const upload = (kind, file) => api(`/assets?kind=${kind}&filename=${path.basename(file)}`, { method: "PUT", body: fs.readFileSync(file) });
+    const br = await upload("broll", broll);
+    const mu = await upload("music", music);
+    const tl = (await api(`/edits/${editId}`)).timeline;
+    const c0 = tl.clips[0];
+    const base = { ...c0, speed: 1, effects: [], envelope: [], volume_db: 0, muted: false };
+    // Two clips from differently coloured topics, joined by a 1 s crossfade at T = 3.0 s.
+    tl.clips = [
+      { ...base, id: "e2e_a", src_in: 12, src_out: 15, start: 0, transition_in: { type: "cut", duration: 0 } },
+      { ...base, id: "e2e_b", src_in: 42, src_out: 47, start: 3, transition_in: { type: "crossfade", duration: 1 } },
+    ];
+    tl.overlays = [{ ...base, id: "e2e_ov", source_id: br.id, src_in: 0, src_out: 1.5, start: 4.2, transform: [0.1, 0.1, 0.5, 0.3], opacity: 1, muted: true, label: "B-roll", transition_in: { type: "cut", duration: 0 } }];
+    tl.audio_clips = [{ id: "e2e_mu", asset_id: mu.id, start: 0, src_in: 0, src_out: null, gain_db: -6, fade_in: 0, fade_out: 0, duck: false, loop: false, envelope: [], label: "music" }];
+    tl.texts = [];
+    tl.graphics = [];
+    tl.reframe.panels = tl.reframe.panels.map((p) => ({ ...p, keyframes: [{ ...p.keyframes[0], t: 0 }] }));
+    await api(`/edits/${editId}/timeline`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(tl) });
+    await page.goto(`${BASE}/editor/${editId}`);
+    await page.getByTestId("preview-canvas").waitFor();
+    await page.waitForFunction(() => window.__clipforgePreview?.media().videos.every((v) => v && v.ready >= 2) && window.__clipforgePreview.media().broll.every((b) => b.ready >= 2), null, { timeout: 30000 });
+    // Mean absolute RGB difference between the live canvas and exporter stills, inside a region.
+    const compare = (t, refs, region = [0, 0, 1, 1]) => page.evaluate(async ({ t, refs, region, eid }) => {
+      const P = window.__clipforgePreview;
+      P.editor.getState().setPlayhead(t);
+      for (let i = 0; i < 200; i++) {
+        await new Promise((r) => setTimeout(r, 50));
+        const m = P.media();
+        if (i > 6 && m.videos.every((v) => !v.seeking) && m.broll.every((b) => !b.seeking)) break;
+      }
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const cv = document.querySelector("[data-testid=preview-canvas]");
+      const w = 90;
+      const h = Math.round((w * cv.height) / cv.width);
+      const grab = (src) => {
+        const c = document.createElement("canvas");
+        c.width = w;
+        c.height = h;
+        const x = c.getContext("2d");
+        x.drawImage(src, 0, 0, w, h);
+        return x.getImageData(0, 0, w, h).data;
+      };
+      const live = grab(cv);
+      const out = {};
+      for (const rt of refs) {
+        const img = new Image();
+        img.src = `/api/edits/${eid}/frame?t=${rt}&width=540`;
+        await img.decode();
+        const ref = grab(img);
+        let s = 0;
+        let n = 0;
+        for (let y = Math.floor(region[1] * h); y < Math.ceil(region[3] * h); y++) {
+          for (let x = Math.floor(region[0] * w); x < Math.ceil(region[2] * w); x++) {
+            const i = (y * w + x) * 4;
+            s += Math.abs(live[i] - ref[i]) + Math.abs(live[i + 1] - ref[i + 1]) + Math.abs(live[i + 2] - ref[i + 2]);
+            n += 3;
+          }
+        }
+        out[rt] = s / n;
+      }
+      return out;
+    }, { t, refs, region, eid: editId });
+    // Mid-crossfade (u = 0.5): live must match the exported blend, not either side alone.
+    const xf = await compare(3.0, [3.0, 2.3, 3.7]);
+    console.log(`     crossfade diff: exact ${xf["3"].toFixed(2)}, vs outgoing-only ${xf["2.3"].toFixed(2)}, vs incoming-only ${xf["3.7"].toFixed(2)}`);
+    assert(xf["3"] < 8 && xf["3"] < 0.6 * Math.min(xf["2.3"], xf["3.7"]), `live crossfade does not match export: ${JSON.stringify(xf)}`);
+    await shot("11-crossfade");
+    // B-roll region (picture-in-picture): live footage, not a placeholder.
+    const ov = await compare(4.9, [4.9, 4.0], [0.1, 0.1, 0.6, 0.4]);
+    console.log(`     B-roll region diff: exact ${ov["4.9"].toFixed(2)}, vs no-overlay ${ov["4"].toFixed(2)}`);
+    assert(ov["4.9"] < 14 && ov["4.9"] < 0.5 * ov["4"], `live B-roll does not match export: ${JSON.stringify(ov)}`);
+    await shot("11-broll");
+    // Playback across the cut: second decoder takes over, music plays at its gain.
+    await page.evaluate(() => window.__clipforgePreview.editor.getState().setPlayhead(1.8));
+    await page.waitForTimeout(400);
+    await page.getByTestId("play").click();
+    const samples = [];
+    for (let i = 0; i < 30; i++) {
+      await page.waitForTimeout(100);
+      samples.push(await page.evaluate(() => ({ ...window.__clipforgePreview.media(), t: window.__clipforgePreview.editor.getState().playhead })));
+    }
+    await page.getByTestId("play").click();
+    const both = samples.filter((m) => m.t > 2.55 && m.t < 3.45 && m.videos.every((v) => !v.paused));
+    const last = samples[samples.length - 1];
+    const music0 = last.audio[0];
+    console.log(`     playback: t ${last.t.toFixed(2)}, dual-decoder samples ${both.length}, main decoder ${last.main}, music t ${music0.t.toFixed(2)} vol ${music0.volume.toFixed(3)}`);
+    assert(last.t > 4, `playback did not reach the B clip (t=${last.t})`);
+    assert(both.length >= 2, "second decoder never played during the crossfade");
+    assert(last.main === 1, "decoders did not swap at the cut (seek fallback used)");
+    assert(!music0.error && music0.t > 2 && Math.abs(music0.t - last.t) < 0.5, `music not following the playhead: ${JSON.stringify(music0)}`);
+    assert(Math.abs(music0.volume - 10 ** (-6 / 20)) < 0.02, `music volume ${music0.volume} != -6 dB`);
   });
   assert(consoleErrors.length === 0, `browser console errors: ${consoleErrors.join(" | ")}`);
   console.log(`\nE2E PASSED: ${results.length} steps`);

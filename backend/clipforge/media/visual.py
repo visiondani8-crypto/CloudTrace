@@ -106,7 +106,9 @@ def analyse_video(
     vf = [f"fps={sample_fps}", f"scale={aw}:{ah}:flags=area"]
     if info.get("hdr"):
         # Analysis only: a cheap approximate SDR mapping is enough for detection.
-        vf.insert(1, "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable,zscale=t=bt709:m=bt709:r=tv,format=yuv420p")
+        from .hdr import tonemap_filters
+
+        vf.insert(1, ",".join(tonemap_filters(info)))
     args = [
         cfg.ffmpeg_bin, "-nostdin", "-hide_banner", "-loglevel", "error",
         "-i", str(src), "-map", "0:v:0", "-an", "-sn",

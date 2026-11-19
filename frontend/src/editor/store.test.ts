@@ -85,3 +85,33 @@ describe("text placement", () => {
     expect(Math.abs(a.y - b.y)).toBeGreaterThan(0.09);
   });
 });
+
+describe("keyframes, envelopes and track selection", () => {
+  beforeEach(() => useEditor.getState().load(makeTimeline()));
+
+  it("deletes a crop keyframe (never the last one) and switches to manual", () => {
+    const st = useEditor.getState();
+    st.commit((t) => { t.reframe.panels[0].keyframes.push({ t: 3, cx: 0.2, cy: 0.5, zoom: 1.2, ease: "linear" }); });
+    st.select({ kind: "keyframe", panel: "main", index: 1 });
+    st.deleteSelection(false);
+    expect(useEditor.getState().timeline!.reframe.panels[0].keyframes).toHaveLength(1);
+    expect(useEditor.getState().timeline!.reframe.mode).toBe("manual");
+    st.select({ kind: "keyframe", panel: "main", index: 0 });
+    st.deleteSelection(false);
+    expect(useEditor.getState().timeline!.reframe.panels[0].keyframes).toHaveLength(1);
+  });
+
+  it("removes envelope points and ignores non-deletable selections", () => {
+    const st = useEditor.getState();
+    st.commit((t) => { t.clips[0].envelope = [{ t: 0.5, gain_db: -6 }, { t: 1.5, gain_db: 0 }]; });
+    st.select({ kind: "envpoint", owner: "clip", id: "c1", index: 0 });
+    st.deleteSelection(false);
+    expect(useEditor.getState().timeline!.clips[0].envelope).toEqual([{ t: 1.5, gain_db: 0 }]);
+    const before = useEditor.getState().past.length;
+    st.select({ kind: "track", id: "a1" });
+    st.deleteSelection(false);
+    st.select({ kind: "captions" });
+    st.deleteSelection(false);
+    expect(useEditor.getState().past.length).toBe(before);
+  });
+});

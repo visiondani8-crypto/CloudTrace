@@ -95,7 +95,8 @@ def build_mix_graph(tl: Timeline, src: Path, has_audio: bool, asset_paths: dict[
             dur = (s1 - s0) / c.speed
             chain = [f"atrim=start={s0:.4f}:end={s1:.4f}", "asetpts=PTS-STARTPTS", *_atempo_chain(c.speed),
                      "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo"]
-            env = [(p.t, p.gain_db) for p in c.envelope]
+            # Envelope times are clip-relative; this chain starts real_pre seconds before the clip.
+            env = [(p.t + real_pre, p.gain_db) for p in c.envelope]
             if env or c.volume_db:
                 chain.append(f"volume='{_envelope_expr(env, c.volume_db)}':eval=frame")
             fi = max(0.008, pre * 2) if pre else 0.008
@@ -110,6 +111,8 @@ def build_mix_graph(tl: Timeline, src: Path, has_audio: bool, asset_paths: dict[
     if dlg_labels:
         parts.append(f"{''.join(dlg_labels)}amix=inputs={len(dlg_labels)}:normalize=0:duration=longest:dropout_transition=0[dmix]")
         vc = voice_chain(a)
+        if dlg_track and dlg_track.gain_db:
+            vc.append(f"volume={dlg_track.gain_db}dB")
         parts.append(f"[dmix]{','.join(vc) if vc else 'anull'}[dlg]")
     else:
         parts.append(f"anullsrc=r={SR}:cl=stereo,atrim=duration={duration:.4f}[dlg]")

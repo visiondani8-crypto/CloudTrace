@@ -16,9 +16,9 @@ PROXY_HEIGHT = 540
 
 
 def _tonemap_chain(info: dict[str, Any]) -> list[str]:
-    if info.get("hdr"):
-        return ["zscale=t=linear:npl=100", "format=gbrpf32le", "zscale=p=bt709", "tonemap=hable:desat=0", "zscale=t=bt709:m=bt709:r=tv"]
-    return []
+    from .hdr import tonemap_filters
+
+    return tonemap_filters(info)
 
 
 def make_proxy(src: Path, dst: Path, info: dict[str, Any], token: CancelToken | None = None, progress=None) -> Path:

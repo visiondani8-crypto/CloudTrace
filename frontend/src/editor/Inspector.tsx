@@ -171,7 +171,7 @@ export function Inspector({ onReframe }: { onReframe: (mode: string) => void }) 
               <Field label="Type"><NativeSelect value={c.transition_in.type} onChange={(v) => upd((x) => { x.transition_in = { type: v as TransitionType, duration: v === "cut" ? 0 : Math.max(0.2, x.transition_in.duration || 0.4) }; })} options={TRANSITIONS.map((t) => ({ value: t, label: t.replace("_", " ") }))} /></Field>
               <Num label="Duration" value={c.transition_in.duration} step={0.05} min={0} max={2} onChange={(v) => upd((x) => { x.transition_in.duration = v; })} suffix="s" />
             </div>
-            {["crossfade", "slide", "zoom"].includes(c.transition_in.type) && <p className="text-2xs text-muted">Live preview shows a cut here; use Exact Frame or export to see the blend.</p>}
+            {["crossfade", "slide", "zoom"].includes(c.transition_in.type) && <p className="text-2xs text-muted">Uses {(c.transition_in.duration / 2).toFixed(2)} s of source handle on each side of the cut (audio overlaps too).</p>}
           </Section>
         )}
         <Section title="Effects" action={<Badge>{c.effects.length}</Badge>}>
@@ -296,6 +296,80 @@ export function Inspector({ onReframe }: { onReframe: (mode: string) => void }) 
         <ColorInput label="Custom colour" value={w.color ?? tl.captions.style.color} onChange={(v) => upd({ color: v })} />
         {w.color && <Button size="xs" variant="ghost" onClick={() => upd({ color: null })}>Clear colour</Button>}
         <p className="text-2xs text-muted">Source time {w.src_s.toFixed(2)}–{w.src_e.toFixed(2)}s</p>
+      </Section>
+    );
+  }
+
+  if (sel?.kind === "keyframe") {
+    const pi = tl.reframe.panels.findIndex((p) => p.id === sel.panel);
+    const k = tl.reframe.panels[pi]?.keyframes[sel.index];
+    if (!k) return null;
+    const upd = (p: Partial<typeof k>) => commit((t) => { Object.assign(t.reframe.panels[pi].keyframes[sel.index], p); t.reframe.mode = "manual"; });
+    const n = tl.reframe.panels[pi].keyframes.length;
+    return (
+      <Section title={`Crop keyframe ${sel.index + 1} of ${n}${tl.reframe.panels.length > 1 ? ` · ${sel.panel}` : ""}`}
+        action={<button disabled={n <= 1} onClick={() => { useEditor.getState().deleteSelection(false); }} className="text-muted hover:text-err disabled:opacity-30" aria-label="Delete keyframe"><Trash2 className="h-3.5 w-3.5" /></button>}>
+        <Num label="Time" value={k.t} min={0} step={0.04} onChange={(v) => upd({ t: Math.max(0, v) })} suffix="s" />
+        <Slider label="Centre X" value={k.cx} min={0} max={1} onChange={(v) => upd({ cx: v })} />
+        <Slider label="Centre Y" value={k.cy} min={0} max={1} onChange={(v) => upd({ cy: v })} />
+        <Slider label="Zoom" value={k.zoom} min={0.25} max={3} onChange={(v) => upd({ zoom: v })} />
+        <Field label="Easing into this keyframe">
+          <NativeSelect value={k.ease} onChange={(v) => upd({ ease: v as typeof k.ease })} options={[{ value: "ease_in_out", label: "Ease in-out" }, { value: "linear", label: "Linear" }, { value: "ease_in", label: "Ease in" }, { value: "ease_out", label: "Ease out" }, { value: "hold", label: "Hold (jump cut)" }]} />
+        </Field>
+        <p className="text-2xs text-muted">Editing keyframes switches the edit to Manual crop. Drag diamonds on the video track to retime them.</p>
+      </Section>
+    );
+  }
+
+  if (sel?.kind === "envpoint") {
+    const env = sel.owner === "clip" ? tl.clips.find((c) => c.id === sel.id)?.envelope : tl.audio_clips.find((a) => a.id === sel.id)?.envelope;
+    const p = env?.[sel.index];
+    if (!p) return null;
+    const upd = (q: Partial<typeof p>) => commit((t) => {
+      const e = sel.owner === "clip" ? t.clips.find((c) => c.id === sel.id)?.envelope : t.audio_clips.find((a) => a.id === sel.id)?.envelope;
+      if (e?.[sel.index]) Object.assign(e[sel.index], q);
+    });
+    return (
+      <Section title="Volume point" action={<button onClick={() => useEditor.getState().deleteSelection(false)} className="text-muted hover:text-err" aria-label="Delete volume point"><Trash2 className="h-3.5 w-3.5" /></button>}>
+        <Num label="Time (from clip start)" value={p.t} min={0} step={0.05} onChange={(v) => upd({ t: Math.max(0, v) })} suffix="s" />
+        <Slider label="Gain" value={p.gain_db} min={-30} max={12} step={0.5} onChange={(v) => upd({ gain_db: v })} format={(v) => `${v.toFixed(1)} dB`} />
+        <p className="text-2xs text-muted">Envelope gain is added to the clip gain and interpolated linearly between points. Double-click a clip's audio lane to add points.</p>
+      </Section>
+    );
+  }
+
+  if (sel?.kind === "captions") {
+    const cs = tl.captions.style;
+    const set = (p: Partial<typeof cs>) => commit((t) => Object.assign(t.captions.style, p));
+    return (
+      <Section title="Caption block">
+        <Slider label="Position X" value={cs.position_x} min={0} max={1} onChange={(v) => set({ position_x: v })} />
+        <Slider label="Position Y" value={cs.position_y} min={0.05} max={0.95} onChange={(v) => set({ position_y: v })} />
+        <Slider label="Size" value={cs.size} min={0.02} max={0.12} step={0.001} onChange={(v) => set({ size: v })} format={(v) => `${(v * 100).toFixed(1)}%`} />
+        <Slider label="Max width" value={cs.max_width} min={0.3} max={1} onChange={(v) => set({ max_width: v })} />
+        <p className="text-2xs text-muted">Drag captions directly on the preview. Full styling lives in the Captions tab; captions always stay inside the platform safe area.</p>
+      </Section>
+    );
+  }
+
+  if (sel?.kind === "track") {
+    const i = tl.tracks.findIndex((t) => t.id === sel.id);
+    const tr = tl.tracks[i];
+    if (!tr) return null;
+    const upd = (p: Partial<typeof tr>) => commit((t) => Object.assign(t.tracks[i], p));
+    return (
+      <Section title={`Track · ${tr.kind}`}>
+        <Field label="Name"><Input value={tr.name} onChange={(e) => upd({ name: e.target.value })} /></Field>
+        {tr.kind === "audio" && <Slider label="Track gain" value={tr.gain_db} min={-24} max={12} step={0.5} onChange={(v) => upd({ gain_db: v })} format={(v) => `${v.toFixed(1)} dB`} />}
+        <Switch checked={tr.locked} onChange={(v) => upd({ locked: v })} label="Locked" />
+        {tr.kind === "audio" ? (
+          <>
+            <Switch checked={tr.muted} onChange={(v) => upd({ muted: v })} label="Muted" />
+            <Switch checked={tr.solo} onChange={(v) => upd({ solo: v })} label="Solo" />
+          </>
+        ) : (
+          <Switch checked={tr.hidden} onChange={(v) => upd({ hidden: v })} label="Hidden (excluded from export)" />
+        )}
       </Section>
     );
   }

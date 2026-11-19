@@ -8,6 +8,7 @@ import { cn } from "@/lib/cn";
 import { IconButton } from "@/components/ui";
 import { clipDuration, segments, sourceToTimeline, timelineDuration } from "./geometry";
 import { useEditor, type Selection } from "./store";
+import { Envelope } from "./Envelope";
 
 const HEAD = 132;
 const LANE_H: Record<string, number> = { video: 56, overlay: 30, captions: 26, text: 30, graphics: 30, audio: 44 };
@@ -238,12 +239,39 @@ export function TimelineView({ sourceId }: { sourceId: string }) {
     } as React.CSSProperties;
   };
 
+  const isKf = (panel: string, index: number) => selection?.kind === "keyframe" && selection.panel === panel && selection.index === index;
+
+  const dragKeyframe = (e: React.PointerEvent, panel: string, index: number) => {
+    e.stopPropagation();
+    e.preventDefault();
+    select({ kind: "keyframe", panel, index });
+    setPlayhead(tl.reframe.panels.find((p) => p.id === panel)!.keyframes[index].t);
+    if (locked("video")) return;
+    const t0 = tl.reframe.panels.find((p) => p.id === panel)!.keyframes[index].t;
+    const pts = snapPoints(tl, useEditor.getState().playhead);
+    startDrag(e, (dt) => {
+      commit((t) => {
+        const kfs = t.reframe.panels.find((p) => p.id === panel)!.keyframes;
+        const lo = index > 0 ? kfs[index - 1].t + 0.04 : 0;
+        const hi = index + 1 < kfs.length ? kfs[index + 1].t - 0.04 : timelineDuration(t);
+        kfs[index].t = Math.round(Math.max(lo, Math.min(hi, snap(t0 + dt, pts, pps, snapping))) * 1000) / 1000;
+        t.reframe.mode = "manual";
+      }, { history: false });
+    }, "ew-resize");
+  };
+
   const renderLane = (tr: Track) => {
     const h = LANE_H[tr.kind] ?? 30;
     const common = cn("relative border-b border-line/70", tr.hidden && "opacity-40");
     if (tr.kind === "video") {
       return (
         <div key={tr.id} className={common} style={{ height: h }}>
+          {tl.reframe.mode !== "original" && tl.reframe.panels.map((p, pi) =>
+            p.keyframes.map((k, ki) => (
+              <button key={`${p.id}-${ki}`} aria-label={`Crop keyframe ${ki + 1}${tl.reframe.panels.length > 1 ? ` (${p.id})` : ""}`}
+                className={cn("absolute z-10 h-2.5 w-2.5 -translate-x-1/2 rotate-45 border border-bg", isKf(p.id, ki) ? "bg-warn" : "bg-accent hover:bg-accent-hover")}
+                style={{ left: k.t * pps, top: 2 + pi * 6 }} onPointerDown={(e) => dragKeyframe(e, p.id, ki)} data-testid="keyframe" />
+            )))}
           {segs.map((sg) => {
             const w = (sg.t1 - sg.t0) * pps;
             const tiles = Math.max(1, Math.ceil(w / ((sprite?.tile_w ?? 160) * ((h - 16) / (sprite?.tile_h ?? 90)))));
@@ -284,6 +312,7 @@ export function TimelineView({ sourceId }: { sourceId: string }) {
               onPointerDown={(e) => { e.stopPropagation(); select({ kind: "clip", id: sg.clip.id }); }}>
               {wave && <Waveform peaks={wave.peaks} perSec={wave.per_second} s0={sg.s0} s1={sg.s1} width={Math.max(4, (sg.t1 - sg.t0) * pps - 1)} height={h - 8} muted={sg.clip.muted || tr.muted} />}
               {sg.clip.volume_db !== 0 && <span className="absolute right-1 top-0.5 text-[10px] text-ok">{sg.clip.volume_db > 0 ? "+" : ""}{sg.clip.volume_db} dB</span>}
+              <Envelope owner="clip" id={sg.clip.id} points={sg.clip.envelope} duration={sg.t1 - sg.t0} width={Math.max(4, (sg.t1 - sg.t0) * pps - 1)} height={h - 8} color="#9fe3c6" />
             </div>
           ))}
         </div>
@@ -298,7 +327,8 @@ export function TimelineView({ sourceId }: { sourceId: string }) {
             return (
               <div key={a.id} className={cn("absolute top-1 cursor-grab rounded-md border px-1 text-[10px]", isMusic ? "border-[#8a6bd6]/50 bg-[#8a6bd6]/15" : "border-warn/50 bg-warn/15", isSel("audio", a.id) && "ring-1 ring-accent")}
                 style={{ left: a.start * pps, width: Math.max(6, len * pps), height: h - 8 }} onPointerDown={(e) => moveItem(e, "audio_clips", a.id, "move")}>
-                <span className="truncate">{a.label} · {a.gain_db} dB{a.duck ? " · ducked" : ""}</span>
+                <span className="pointer-events-none truncate">{a.label} · {a.gain_db} dB{a.duck ? " · ducked" : ""}</span>
+                <Envelope owner="audio" id={a.id} points={a.envelope} duration={len} width={Math.max(6, len * pps)} height={h - 8} color={isMusic ? "#c6b4f2" : "#f3d39a"} />
                 <div className="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize" onPointerDown={(e) => moveItem(e, "audio_clips", a.id, "trim-l")} />
                 <div className="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize" onPointerDown={(e) => moveItem(e, "audio_clips", a.id, "trim-r")} />
               </div>
@@ -384,7 +414,8 @@ export function TimelineView({ sourceId }: { sourceId: string }) {
             <div className="h-[22px] border-b border-r border-line" />
             {tracks.map((tr) => (
               <div key={tr.id} className="flex items-center gap-0.5 border-b border-r border-line/70 px-1.5" style={{ height: LANE_H[tr.kind] ?? 30 }}>
-                <span className="flex-1 truncate text-[11px] text-sub">{tr.name}</span>
+                <button className={cn("flex-1 truncate text-left text-[11px] hover:text-fg", isSel("track", tr.id) ? "text-accent" : "text-sub")} onClick={() => select({ kind: "track", id: tr.id })}
+                  title="Track properties">{tr.name}{tr.kind === "audio" && tr.gain_db ? ` ${tr.gain_db > 0 ? "+" : ""}${tr.gain_db}dB` : ""}</button>
                 <button className="rounded p-0.5 text-muted hover:text-fg" onClick={() => toggleTrack(tr.id, "locked")} aria-label={tr.locked ? "Unlock track" : "Lock track"}>
                   {tr.locked ? <Lock className="h-3 w-3 text-warn" /> : <Unlock className="h-3 w-3" />}
                 </button>

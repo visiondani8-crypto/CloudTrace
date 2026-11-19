@@ -295,3 +295,35 @@ def test_brand_kit_keeps_word_box_text_readable():
     cs = tl.captions.style
     assert cs.background_color == "#FF5A36" and cs.active_color != cs.background_color
     assert contrast_text("#FFFFFF") == "#0B0E14" and contrast_text("#101010") == "#FFFFFF"
+
+
+def test_audio_graph_honours_track_gain_envelopes_and_mutes(tmp_path):
+    from clipforge.render.audio_mix import build_mix_graph
+    from clipforge.schemas import AudioClip, VolumePoint
+
+    tl = Timeline(source_id="s", clips=[VideoClip(id="a", src_in=0, src_out=4, envelope=[VolumePoint(t=0, gain_db=0), VolumePoint(t=2, gain_db=-12)])])
+    next(t for t in tl.tracks if t.id == "a1").gain_db = 3.0
+    music = tmp_path / "m.mp3"
+    music.write_bytes(b"x")
+    tl.audio_clips = [AudioClip(id="m", asset_id="as1", start=0, src_out=4, label="music")]
+    _, g = build_mix_graph(tl, tmp_path / "src.mp4", True, {"as1": music}, 4.0)
+    assert "volume=3.0dB" in g and "if(lt(t,2" in g and "sidechaincompress" in g
+    next(t for t in tl.tracks if t.id == "a2").muted = True
+    _, g2 = build_mix_graph(tl, tmp_path / "src.mp4", True, {"as1": music}, 4.0)
+    assert "sidechaincompress" not in g2 and "[m0]" not in g2
+
+
+def test_dialogue_envelope_stays_clip_relative_across_transition_handles(tmp_path):
+    """The chain of a clip with an incoming crossfade starts half a transition early; envelope times must shift with it."""
+    from clipforge.render.audio_mix import build_mix_graph
+    from clipforge.schemas import Transition, VolumePoint
+
+    tl = Timeline(source_id="s", clips=[
+        VideoClip(id="a", src_in=0, src_out=4),
+        VideoClip(id="b", src_in=10, src_out=14, transition_in=Transition(type="crossfade", duration=1.0),
+                  envelope=[VolumePoint(t=1, gain_db=0), VolumePoint(t=2, gain_db=-12)]),
+    ])
+    _, g = build_mix_graph(tl, tmp_path / "src.mp4", True, {}, 8.0)
+    chain_b = next(p for p in g.split(";") if p.endswith("[d1]"))
+    assert "atrim=start=9.5000" in chain_b
+    assert "if(lt(t,2.5)" in chain_b and "if(lt(t,1.5)" in chain_b  # 1 s and 2 s clip-relative, +0.5 s handle

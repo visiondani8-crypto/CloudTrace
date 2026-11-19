@@ -45,9 +45,9 @@ HANDLE_TRANSITIONS = ("crossfade", "slide", "zoom")
 
 def _decode_filters(info: dict[str, Any], speed: float, fps: float, scale_wh: tuple[int, int] | None) -> str:
     vf = []
-    if info.get("hdr"):
-        vf += ["zscale=t=linear:npl=100", "format=gbrpf32le", "zscale=p=bt709", "tonemap=hable:desat=0",
-               "zscale=t=bt709:m=bt709:r=tv", "format=yuv420p"]
+    from ..media.hdr import tonemap_filters
+
+    vf += tonemap_filters(info)
     vf.append(f"setpts=(PTS-STARTPTS)/{speed:.6f}")
     vf.append(f"fps={fps:.6f}")
     matrix = info.get("color_space") or ("bt709" if info.get("display_height", 0) >= 720 else "bt601")

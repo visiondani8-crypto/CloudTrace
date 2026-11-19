@@ -119,7 +119,7 @@ def render_edit(edit_id: str, render_id: str, settings: ExportSettings, ctx) -> 
     if free < need:
         raise OSError(28, f"Only {human_bytes(free)} free; this render needs about {human_bytes(need)}.")
     base = sanitize_filename(s.name or edit.name or "clip", max_len=80).replace(" ", "_")
-    base = f"{base}_{tl.canvas.aspect.replace(':', 'x')}_{out_h if out_w < out_h else out_w}p"
+    base = f"{base}_{tl.canvas.aspect.replace(':', 'x')}_{min(out_w, out_h)}p"
     out_path = _output_path(folder, base, ext)
     wd = _prepare_workdir(render_id)
     try:

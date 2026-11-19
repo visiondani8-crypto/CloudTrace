@@ -11,6 +11,10 @@ export type Selection =
   | { kind: "audio"; id: string }
   | { kind: "word"; id: number }
   | { kind: "marker"; id: string }
+  | { kind: "keyframe"; panel: string; index: number }
+  | { kind: "envpoint"; owner: "clip" | "audio"; id: string; index: number }
+  | { kind: "captions" }
+  | { kind: "track"; id: string }
   | null;
 
 const HISTORY = 100;
@@ -159,7 +163,7 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   deleteSelection: (ripple) => {
     const { selection, timeline } = get();
-    if (!selection || !timeline) return;
+    if (!selection || !timeline || selection.kind === "captions" || selection.kind === "track") return;
     get().commit((tl) => {
       if (selection.kind === "clip") {
         if (tl.clips.length <= 1) return;
@@ -185,6 +189,15 @@ export const useEditor = create<EditorState>((set, get) => ({
         if (w) w.hidden = true;
       } else if (selection.kind === "marker") {
         tl.markers = tl.markers.filter((m) => m.id !== selection.id);
+      } else if (selection.kind === "keyframe") {
+        const p = tl.reframe.panels.find((x) => x.id === selection.panel);
+        if (p && p.keyframes.length > 1) {
+          p.keyframes.splice(selection.index, 1);
+          tl.reframe.mode = "manual";
+        }
+      } else if (selection.kind === "envpoint") {
+        const env = selection.owner === "clip" ? tl.clips.find((c) => c.id === selection.id)?.envelope : tl.audio_clips.find((a) => a.id === selection.id)?.envelope;
+        env?.splice(selection.index, 1);
       }
     });
     set({ selection: null });
