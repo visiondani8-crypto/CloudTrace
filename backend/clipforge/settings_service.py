@@ -12,7 +12,7 @@ from .models import Setting, utcnow
 DEFAULTS: dict[str, Any] = {
     "storage": {"exports_dir": "", "copy_imports": False},
     "cache": {"max_gb": 50, "keep_proxies": True},
-    "transcription": {"engine": "auto", "model": "", "language": "", "compute_type": "auto"},
+    "transcription": {"engine": "auto", "model": "", "language": "", "compute_type": "auto", "speaker_model": "auto"},
     "ai": {"provider": "local", "cloud_consent": False, "ollama_url": "http://127.0.0.1:11434", "ollama_model": "qwen2.5:7b-instruct",
            "anthropic_model": "claude-opus-5-5", "anthropic_effort": "medium"},
     "defaults": {"platform": "tiktok", "caption_style": "bold_social", "edit_style": "dynamic", "aspect": "9:16",

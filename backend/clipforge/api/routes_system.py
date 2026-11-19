@@ -22,6 +22,7 @@ from ..db import SCHEMA_VERSION, session_scope
 from ..edit.fonts import list_fonts
 from ..jobs.queue import get_manager
 from ..media.ffprobe import ffmpeg_available, probe
+from ..media.voice_encoder import status as voice_status
 from ..models import Asset, BrandKit, Edit, Highlight, Job, MediaSource, Project, Render, SocialPackage, UsageRecord, utcnow
 from ..render.encode import hardware_summary
 from ..settings_service import get_settings, update_settings
@@ -77,6 +78,7 @@ def providers_status():
         "anthropic": {**anth, "cloud_consent": ai["cloud_consent"], "masked_key": masked("anthropic_api_key")},
         "usage": {"input_tokens": int(usage[0]), "output_tokens": int(usage[1]), "estimated_cost_usd": round(float(usage[2]), 4)},
         "transcription": engine_status(st["transcription"]["model"]),
+        "speaker_model": voice_status(),
     }
 
 
@@ -340,6 +342,9 @@ def diagnostics():
     dep("H.264 encoder", enc.get("libx264", False) or enc.get("h264_videotoolbox", False), "libx264" if enc.get("libx264") else "videotoolbox")
     dep("HEVC encoder", enc.get("libx265", False) or enc.get("hevc_videotoolbox", False), "libx265/videotoolbox", required=False)
     dep("ProRes encoder", enc.get("prores_ks", False), "prores_ks (Archival Master)", required=False)
+    vs = voice_status()
+    dep("Neural speaker model", vs["installed"], vs["source"] if vs["installed"] else "not installed — spectral speaker detection is used",
+        None if vs["installed"] else "Optional: Settings → Transcription → Speaker detection → Install", required=False)
     tr = engine_status(st["transcription"]["model"])
     fw = tr["faster-whisper"]
     dep("faster-whisper", fw.get("available", False), fw.get("reason") or f"model {st['transcription']['model']} ready",
@@ -459,3 +464,25 @@ def tuning_reset(mode: str):
 
     tuning.reset(mode)
     return tuning.status()["modes"].get(mode, {})
+
+
+# ----------------------------------------------------------------------------- optional neural speaker model
+@router.post("/speaker-model/install")
+def speaker_model_install():
+    """User-initiated: download the public Resemblyzer wheel (15.7 MB) from PyPI and convert its weights."""
+    from ..media import voice_encoder as ve
+
+    try:
+        ve.download_and_install()
+    except Exception as e:  # network blocked, checksum mismatch …
+        raise HTTPException(502, f"Could not install the speaker model: {e}. Offline alternative: "
+                                 "python -m clipforge.devtools.voice_model install --wheel <file>") from e
+    return ve.status()
+
+
+@router.delete("/speaker-model")
+def speaker_model_remove():
+    from ..media import voice_encoder as ve
+
+    ve.remove()
+    return ve.status()

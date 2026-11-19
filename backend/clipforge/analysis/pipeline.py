@@ -173,11 +173,16 @@ def run_analysis(project_id: str, source_id: str, settings: AnalysisSettings, ct
     topics = topic_segments(sentences, tfidf, min_seconds=max(10.0, min(45.0, duration / 8.0)), scene_cuts=visual["scene_cuts"])
     speakers = None
     if settings.diarize and mp["diarize"] and media["wav"] is not None:
-        sp_path = cdir / f"speakers_{transcript.get('engine')}_{len(sentences)}.json"
+        from ..media.voice_encoder import load_encoder
+
+        want = ((app_settings or {}).get("transcription") or {}).get("speaker_model", "auto")
+        encoder = load_encoder() if want != "spectral" else None
+        sp_path = cdir / f"speakers_{transcript.get('engine')}_{len(sentences)}_{'neural' if encoder else 'spectral'}.json"
         speakers = read_json(sp_path)
         if not speakers:
-            speakers = speaker_turns(sentences, media["wav"])
+            speakers = speaker_turns(sentences, media["wav"], encoder=encoder)
             atomic_write_json(sp_path, speakers)
+        ctx.info(f"Speakers: {speakers.get('count')} ({speakers.get('method')}, confidence {speakers.get('confidence')})")
     instructions = parse_instructions(settings.custom_instructions)
     feats = sentence_features(sentences, tfidf, media["audio"], visual, topics, speakers, instructions)
     summary = {

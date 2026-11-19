@@ -10,9 +10,8 @@ from __future__ import annotations
 import json
 
 import pytest
-from pydantic import BaseModel, Field
-
 from conftest import anthropic_message
+from pydantic import BaseModel, Field
 
 
 class Pick(BaseModel):

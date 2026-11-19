@@ -302,10 +302,11 @@ try {
     const both = samples.filter((m) => m.t > 2.55 && m.t < 3.45 && m.videos.every((v) => !v.paused));
     const last = samples[samples.length - 1];
     const music0 = last.audio[0];
-    console.log(`     playback: t ${last.t.toFixed(2)}, dual-decoder samples ${both.length}, main decoder ${last.main}, music t ${music0.t.toFixed(2)} vol ${music0.volume.toFixed(3)}`);
+    console.log(`     playback: t ${last.t.toFixed(2)}, dual-decoder samples ${both.length}, cuts ${JSON.stringify(last.cuts.map((c) => ({ swap: c.swap, drift: +c.drift.toFixed(3) })))}, music t ${music0.t.toFixed(2)} vol ${music0.volume.toFixed(3)}`);
     assert(last.t > 4, `playback did not reach the B clip (t=${last.t})`);
     assert(both.length >= 2, "second decoder never played during the crossfade");
-    assert(last.main === 1, "decoders did not swap at the cut (seek fallback used)");
+    assert(last.cuts.length === 1 && last.cuts[0].handle && last.cuts[0].swap, `expected exactly one decoder swap at the cut: ${JSON.stringify(last.cuts)}`);
+    assert(samples.every((m, i) => i === 0 || m.t >= samples[i - 1].t - 1e-3), "playhead moved backwards during playback");
     assert(!music0.error && music0.t > 2 && Math.abs(music0.t - last.t) < 0.5, `music not following the playhead: ${JSON.stringify(music0)}`);
     assert(Math.abs(music0.volume - 10 ** (-6 / 20)) < 0.02, `music volume ${music0.volume} != -6 dB`);
   });

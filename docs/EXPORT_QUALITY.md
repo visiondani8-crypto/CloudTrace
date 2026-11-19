@@ -19,7 +19,7 @@
 | Archival Master | ProRes 422 HQ (10-bit 4:2:2 container) in .mov | PCM 24-bit | Mezzanine for further editing; very large files |
 | Custom | H.264/HEVC/ProRes, CRF or bitrate, speed, fps, resolution | 128–320 kb/s | Full control |
 
-The compositor processes 8-bit RGB. ProRes and 10-bit containers preserve that quality without further loss, but they do not restore precision the pipeline didn't carry. For HDR sources, ClipForge applies an **explicit HDR→SDR tone-map** (zimg/Hable) and records it in the render report. ClipForge does not export HDR.
+The compositor processes 8-bit RGB. ProRes and 10-bit containers preserve that quality without further loss, but they do not restore precision the pipeline didn't carry. For HDR sources (PQ or HLG), ClipForge applies an **explicit HDR→SDR tone-map** (zimg linearisation → BT.709 primaries → Mobius curve, `media/hdr.py`) and records it in the render report. Mobius replaced Hable after measurement: on the HDR test clips, Hable output came out about 35% darker than the SDR reference, while Mobius stays within 20% brightness and keeps at least 85% of the saturation (`test_hdr_source_is_tonemapped_to_sdr`). ClipForge does not export HDR.
 
 ## Resolution & upscaling: honest numbers
 

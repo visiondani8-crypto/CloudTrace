@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, KeyRound, ShieldCheck, Trash2, XCircle } from "lucide-react";
-import { errorMessage, get, patch, post, put } from "@/lib/api";
+import { del, errorMessage, get, patch, post, put } from "@/lib/api";
 import { MODE_LABELS, PLATFORM_LABELS, STYLE_LABELS } from "@/lib/format";
 import { Alert, Badge, Button, Card, CardHeader, Field, Input, NativeSelect, PageHeader, Spinner, Switch, Tab, TabList, TabPanel, Tabs, useToast } from "@/components/ui";
 import { TuningPanel } from "./TuningPanel";
@@ -23,6 +23,8 @@ export default function SettingsPage() {
   });
   const setKeyM = useMutation({ mutationFn: () => put<any>("/providers/anthropic/key", { api_key: key || null }), onSuccess: (r) => { setKey(""); reprov(); toast({ tone: "ok", text: r.masked ? `Key stored in ${r.stored_in}` : "Key removed" }); } });
   const verify = useMutation({ mutationFn: () => post<any>("/providers/anthropic/verify"), onSuccess: (r) => toast({ tone: r.ok ? "ok" : "err", text: r.ok ? `Key works (${r.model})` : r.error }) });
+  const instVoice = useMutation({ mutationFn: () => post<any>("/speaker-model/install"), onSuccess: () => { reprov(); rediag(); toast({ tone: "ok", text: "Neural speaker model installed" }); }, onError: (e) => toast({ tone: "err", text: errorMessage(e) }) });
+  const rmVoice = useMutation({ mutationFn: () => del<any>("/speaker-model"), onSuccess: () => { reprov(); rediag(); toast({ tone: "ok", text: "Speaker model removed" }); } });
   const cleanup = useMutation({ mutationFn: (b: any) => post<any>("/maintenance/cleanup", b), onSuccess: (r) => { toast({ tone: "ok", text: `Freed ${r.freed}` }); qc.invalidateQueries({ queryKey: ["dashboard"] }); } });
   if (!s) return <div className="p-8"><Spinner /></div>;
   const up = (sec: string, k: string, v: any) => setS({ ...s, [sec]: { ...s[sec], [k]: v } });
@@ -63,6 +65,26 @@ export default function SettingsPage() {
               </div>
               {fwStatus && <Alert tone={fwStatus.available ? "ok" : "warn"}>{fwStatus.available ? (fwStatus.reason ?? "faster-whisper model ready") : `faster-whisper unavailable: ${fwStatus.reason}`}</Alert>}
               <p className="text-2xs text-muted">Apple Silicon: faster-whisper runs on the CPU (int8). “small” is a good balance; “large-v3” is most accurate but slower.</p>
+            </div>
+          </Card>
+          <Card className="mt-4" data-testid="speaker-model"><CardHeader title="Speaker detection" sub="Who is talking when — used for speaker framing and back-and-forth scoring." />
+            <div className="space-y-3 px-4 pb-4">
+              <Field label="Method">
+                <NativeSelect value={s.transcription.speaker_model ?? "auto"} onChange={(v) => up("transcription", "speaker_model", v)}
+                  options={[{ value: "auto", label: "Auto (neural model when installed, else spectral)" }, { value: "spectral", label: "Spectral heuristic only" }]} />
+              </Field>
+              {prov?.speaker_model?.installed ? (
+                <div className="flex items-center justify-between gap-3">
+                  <Alert tone="ok">Neural speaker model installed: {prov.speaker_model.source}</Alert>
+                  <Button size="sm" variant="ghost" loading={rmVoice.isPending} onClick={() => rmVoice.mutate()}>Remove</Button>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between gap-3 rounded-lg border border-line bg-bg/40 p-3 text-2xs text-sub">
+                  <span>Optional neural model ({prov?.speaker_model?.source ?? "Resemblyzer voice encoder, Apache-2.0"}). Downloads {prov?.speaker_model?.download_mb ?? 15.7} MB once from PyPI; runs locally, no audio is uploaded. Separates voices better than the spectral heuristic, especially across changing mics or noise.</span>
+                  <Button size="sm" variant="outline" loading={instVoice.isPending} onClick={() => instVoice.mutate()} data-testid="install-speaker-model">Install</Button>
+                </div>
+              )}
+              <p className="text-2xs text-muted">Changes apply to the next analysis; speaker labels are cached per file and method.</p>
             </div>
           </Card>
         </TabPanel>

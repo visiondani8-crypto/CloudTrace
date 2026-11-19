@@ -66,6 +66,15 @@ Choose the model in **Settings → Transcription**: `tiny`, `base`, `small` (def
 
 Engine `auto` uses faster-whisper. If the model can't be loaded (offline, first run), it falls back to pocketsphinx and shows a warning on the job.
 
+### Optional neural speaker model
+
+Speaker detection uses a spectral heuristic out of the box. For better voice separation, install the Resemblyzer voice encoder (Apache-2.0, 15.7 MB, checksum-verified, no PyTorch needed):
+
+- **Settings → Transcription → Speaker detection → Install**, or
+- `cd backend && uv run python -m clipforge.devtools.voice_model install`. For offline use, add `--wheel /path/to/Resemblyzer-0.1.4-py3-none-any.whl`.
+
+It is stored in `~/ClipForge/Models/`. Remove it with `... voice_model remove`. See [TUNING.md](TUNING.md) for how it works and what it was tested on.
+
 ## Optional AI providers
 
 Everything works without a language model: ranking is deterministic and social copy is extractive. Optionally:

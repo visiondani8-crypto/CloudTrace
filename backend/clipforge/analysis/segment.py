@@ -161,8 +161,109 @@ def _mel_filterbank(sr: int, n_fft: int, n_mels: int = 24) -> np.ndarray:
     return fb
 
 
-def speaker_turns(sentences: list[dict[str, Any]], wav: Path, max_speakers: int = 4) -> dict[str, Any]:
-    """Estimate speaker labels per sentence from spectral voice signatures.
+NEURAL_ONE_SPEAKER = 0.80  # if even the two most different groups are this alike, it is one voice
+
+
+def _silhouette(sim: np.ndarray, labels: np.ndarray) -> float:
+    """Mean silhouette with cosine distance (1 - similarity)."""
+    dist = 1.0 - sim
+    ks = np.unique(labels)
+    if len(ks) < 2:
+        return -1.0
+    s = []
+    for i in range(len(labels)):
+        own = labels == labels[i]
+        n_own = own.sum() - 1
+        if n_own == 0:
+            s.append(0.0)
+            continue
+        a = dist[i, own].sum() / n_own
+        b = min(dist[i, labels == k].mean() for k in ks if k != labels[i])
+        s.append((b - a) / max(a, b, 1e-9))
+    return float(np.mean(s))
+
+
+def neural_speaker_turns(sentences: list[dict[str, Any]], wav: Path, encoder, max_speakers: int = 4) -> dict[str, Any] | None:
+    """Speaker labels from neural d-vectors (see media/voice_encoder.py).
+
+    One embedding per sentence (up to 10 s of audio). Average-linkage agglomerative clustering on
+    cosine similarity gives a partition for every speaker count; the count is the one with the best
+    silhouette score (2…max_speakers), or one speaker when even the best split leaves groups that
+    sound alike. Stray single-sentence clusters join their nearest speaker; sentences too short to
+    embed inherit the previous label.
+    """
+    embs: dict[int, np.ndarray] = {}
+    for i, s in enumerate(sentences):
+        e = encoder.embed_utterance(load_wav_segment(wav, s["start"], min(s["end"], s["start"] + 10.0)))
+        if e is not None:
+            embs[i] = e
+    if len(embs) < 2:
+        return None
+    idx = sorted(embs)
+    X = np.array([embs[i] for i in idx])
+    sim = X @ X.T
+    n = len(idx)
+
+    def link(a: list[int], b: list[int]) -> float:
+        return float(sim[np.ix_(a, b)].mean())
+
+    # Full merge history; keep the partitions for k = 1..max_speakers.
+    clusters = [[k] for k in range(n)]
+    partitions: dict[int, list[list[int]]] = {}
+    while len(clusters) > 1:
+        if len(clusters) <= max_speakers:
+            partitions[len(clusters)] = [list(c) for c in clusters]
+        best, bi, bj = -2.0, -1, -1
+        for i in range(len(clusters)):
+            for j in range(i + 1, len(clusters)):
+                v = link(clusters[i], clusters[j])
+                if v > best:
+                    best, bi, bj = v, i, j
+        clusters[bi] = clusters[bi] + clusters.pop(bj)
+    partitions[1] = [list(range(n))]
+    min_size = max(2, int(0.05 * n))
+
+    def tidy(parts: list[list[int]]) -> list[list[int]]:
+        big = [list(c) for c in parts if len(c) >= min_size] or [list(max(parts, key=len))]
+        for c in parts:
+            if len(c) < min_size and c not in big:
+                max(big, key=lambda b: link(c, b)).extend(c)
+        return big
+
+    scored = []
+    for k in range(2, min(max_speakers, n - 1) + 1):
+        if k in partitions:
+            parts = tidy(partitions[k])
+            lab = np.empty(n, int)
+            for m, c in enumerate(parts):
+                lab[c] = m
+            scored.append((_silhouette(sim, lab), len(parts), parts))
+    best_parts = [list(range(n))]
+    if scored:
+        sil, _, parts = max(scored, key=lambda x: (round(x[0], 3), -x[1]))
+        between = min(link(a, b) for m, a in enumerate(parts) for b in parts[m + 1 :]) if len(parts) > 1 else 1.0
+        if len(parts) > 1 and sil > 0.05 and between < NEURAL_ONE_SPEAKER:
+            best_parts = parts
+    best_parts.sort(key=min)  # speaker 0 = first to talk
+    label_of = {idx[k]: m for m, c in enumerate(best_parts) for k in c}
+    labels, last = [], 0
+    for i in range(len(sentences)):
+        last = label_of.get(i, last)
+        labels.append(last)
+    if len(best_parts) > 1:
+        lab = np.empty(n, int)
+        for m, c in enumerate(best_parts):
+            lab[c] = m
+        conf = _silhouette(sim, lab) / 0.4
+    else:
+        conf = (float(sim[~np.eye(n, dtype=bool)].mean()) - 0.6) / 0.3
+    return {"labels": labels, "count": len(best_parts), "confidence": round(float(max(0.0, min(1.0, conf))), 3),
+            "method": "neural (Resemblyzer voice encoder)", "embedded": n}
+
+
+def speaker_turns(sentences: list[dict[str, Any]], wav: Path, max_speakers: int = 4, encoder=None) -> dict[str, Any]:
+    """Speaker labels per sentence: neural d-vectors when the optional voice encoder is installed
+    (``encoder``), otherwise spectral voice signatures.
 
     Experimental heuristic (no neural diarisation model): mean/std of log-mel
     energies per sentence, cepstral mean normalisation, agglomerative
@@ -170,6 +271,10 @@ def speaker_turns(sentences: list[dict[str, Any]], wav: Path, max_speakers: int 
     """
     if len(sentences) < 2 or not wav.exists():
         return {"labels": [0] * len(sentences), "count": 1, "confidence": 0.0, "method": "none"}
+    if encoder is not None:
+        res = neural_speaker_turns(sentences, wav, encoder, max_speakers)
+        if res is not None:
+            return res
     n_fft = 512
     hop = 160
     fb = _mel_filterbank(ANALYSIS_SR, n_fft)

@@ -83,6 +83,10 @@ class AppConfig(BaseSettings):
         return self.data_dir / "Logs"
 
     @property
+    def models_dir(self) -> Path:
+        return self.data_dir / "Models"
+
+    @property
     def secrets_path(self) -> Path:
         return self.data_dir / ".secrets.json"
 

@@ -206,6 +206,7 @@ export function Preview({ timeline, ops, sourceId, probe, showSafe, exactFrameUr
   // supplies the far side of crossfade/slide/zoom transitions and swaps in at the cut.
   const vids = useRef<(HTMLVideoElement | null)[]>([null, null]);
   const mainIdx = useRef(0);
+  const cuts = useRef<{ t: number; handle: boolean; swap: boolean; drift: number }[]>([]);
   const layers = useRef(new Map<string, Ctx>());
   const vigCache = useRef(new Map<string, Float32Array>());
   const images = useRef(new Map<string, HTMLImageElement>());
@@ -312,6 +313,7 @@ export function Preview({ timeline, ops, sourceId, probe, showSafe, exactFrameUr
       editor: useEditor,
       media: () => ({
         main: mainIdx.current,
+        cuts: cuts.current,
         videos: vids.current.map((v) => v && { paused: v.paused, t: v.currentTime, muted: v.muted, volume: v.volume, seeking: v.seeking, ready: v.readyState }),
         broll: [...brolls.current].map(([id, v]) => ({ id, paused: v.paused, t: v.currentTime, seeking: v.seeking, ready: v.readyState, error: !!v.error })),
         audio: [...audios.current].map(([id, a]) => ({ id, paused: a.paused, t: a.currentTime, volume: a.volume, seeking: a.seeking, ready: a.readyState, error: !!a.error })),
@@ -543,7 +545,11 @@ export function Preview({ timeline, ops, sourceId, probe, showSafe, exactFrameUr
             if (next) {
               const sec = vids.current[1 - mainIdx.current];
               const tr = next.clip.transition_in;
-              if (sec && HANDLE_TRANSITIONS.has(tr.type) && tr.duration > 0 && !sec.paused && Math.abs(sec.currentTime - next.s0) < 0.3) {
+              const handle = !!sec && HANDLE_TRANSITIONS.has(tr.type) && tr.duration > 0;
+              const drift = sec ? sec.currentTime - next.s0 : NaN;
+              const swap = handle && !sec!.paused && Math.abs(drift) < 0.6;
+              cuts.current = [...cuts.current.slice(-9), { t: next.t0, handle, swap, drift }];
+              if (swap) {
                 // The secondary decoder is already playing the incoming clip's handle: swap roles,
                 // so the outgoing clip's tail keeps playing on the other element.
                 mainIdx.current = 1 - mainIdx.current;
@@ -558,7 +564,9 @@ export function Preview({ timeline, ops, sourceId, probe, showSafe, exactFrameUr
               t = Math.max(0, sg.t1 - 1e-3);
             }
           } else if (nt >= sg.t0 - 0.05) {
-            t = nt;
+            // A decoder that lags a few ms behind its clip start must not drag the playhead back
+            // into the previous clip (that would re-trigger the cut and swap the decoders again).
+            t = Math.max(sg.t0, nt);
           }
           if (Math.abs(t - st.playhead) > 1e-4) st.setPlayhead(t);
         }

@@ -9,10 +9,25 @@ Status legend:
 
 Test evidence (latest run, Linux container, 4 vCPU, FFmpeg 6.1):
 
-- **Backend:** `pytest`: 40 tests (28 unit/API/job-queue + 12 real-media video tests) pass with faster-whisper. The video suite also passes with the offline pocketsphinx engine.
-- **Frontend:** `tsc` clean; `vitest`: 18 tests (geometry parity with Python, editor store, UI interactions).
-- **End to end:** `e2e/workflow.e2e.mjs` drives a real browser against the real backend: import → analyse → highlights → preview → editor → subtitle edit → text overlay → save → exact frame → render → ffprobe/browser playback → social package → ZIP → reload. Ten steps, no console errors.
+- **Backend:** `pytest`: **86 tests pass** with faster-whisper and the optional speaker model provided:
+  - 16 analysis unit tests
+  - 14 core/API/job-queue tests
+  - 8 tuning/evaluation tests
+  - 11 LLM-provider protocol-stub tests
+  - 6 voice-encoder tests (one needs the Resemblyzer wheel locally and is skipped without it)
+  - 14 real-media pipeline tests
+  - 17 per-effect/transition/edge-media render tests
+
+  The video suite also passes with the offline pocketsphinx engine.
+- **Frontend:** `tsc` clean; `vitest`: 26 tests (geometry parity with Python, editor store incl. keyframes/envelopes, preview media-sync rules, UI interactions incl. ratings and tuning).
+- **End to end:** `e2e/workflow.e2e.mjs` drives a real browser against the real backend in 11 steps: import → analyse → highlights → preview → editor → subtitle edit → text overlay → save → exact frame → render → ffprobe/browser playback → social package → ZIP → reload, then (step 11) live preview vs exporter. Step 11 compares a mid-crossfade frame and a B-roll region with exporter stills, plays across the cut (one decoder swap, monotonic playhead) and checks music volume. No console errors. Passed twice in a row after the decoder-swap fix below.
 - **Additional recorded verifications:** a batch job (analyse → 3 branded edits → 3 validated renders); Regenerate Edit and versions; hook apply; SRT import; split/fill/speaker reframing; HEVC split-screen with music ducking; ProRes archival; all 10 caption presets through the exporter; job pause and resume.
+- **Bugs found and fixed by the new tests:**
+  - The structured-output schema dropped any field named `title`, so Claude-based refinement could never validate.
+  - Dialogue envelopes were shifted on clips with an incoming crossfade.
+  - The preview playhead could step back across a cut and make the decoders swap repeatedly.
+  - VFR output used the average frame rate.
+  - Hable HDR tone-mapping came out too dark.
 
 The test media is a generated two-voice "podcast" (FFmpeg flite TTS) with known sentence timecodes, two real face photos and scene changes (`backend/tests/fixtures/make_test_video.py`). Real-world footage will be harder than this synthetic content, so the heuristics are tuned for it but not validated on a large real corpus.
 
@@ -25,10 +40,10 @@ The test media is a generated two-voice "podcast" (FFmpeg flite TTS) with known 
 | Link local file by path (no copy), copy option | ✅ | API test |
 | Relink missing media (fingerprint-verified) | ✅ | API test (rejects a different file) |
 | URL import via yt-dlp (no DRM/paywall bypass, rights confirmation) | 🟡 | Implemented; the sandbox blocks external sites, so it is untested |
-| MP4/MOV/MKV/WebM/AVI; H.264/HEVC/etc. via FFmpeg | 🟡 | MP4/H.264 tested; other containers rely on FFmpeg |
+| MP4/MOV/MKV/WebM/AVI; H.264/HEVC/etc. via FFmpeg | ✅ / 🟡 | MP4/H.264 and MKV/HEVC tested (`test_mkv_hevc_source_gets_browser_proxy_and_renders`); 4K source tested at source detail; MOV/WebM/AVI rely on FFmpeg |
 | Metadata: duration, resolution, fps, codecs, bitrate, DAR, channels, size, missing audio, rotation | ✅ | `test_probe_metadata` (incl. 90° rotation, no-audio) |
-| VFR detection and conforming | 🟡 | Detection by packet timing + `fps` conforming; no VFR sample tested |
-| HDR detection + explicit tone-map | 🟡 | Implemented (zscale/tonemap); no HDR sample tested |
+| VFR detection and conforming | ✅ | `test_vfr_source_is_conformed`: a generated VFR clip renders at the nominal rate, snapped to 24/25/30/50/60 (the average-rate bug that produced 23.08 fps is fixed) |
+| HDR detection + explicit tone-map | ✅ | `test_hdr_source_is_tonemapped_to_sdr` for PQ and HLG: within 20% of the SDR reference brightness and ≥85% of its saturation (Mobius; Hable was ~35% too dark) |
 | Corrupted file handling | ✅ | `test_corrupted_file_is_reported` |
 | Fast / Balanced / Deep modes | ✅ / 🟡 | Balanced tested everywhere, Fast used by the batch run; Deep only differs by parameters and is untested |
 | Preview proxy, waveform, thumbnail sprite | ✅ | E2E (preview playback), screenshots |
@@ -43,16 +58,18 @@ The test media is a generated two-voice "podcast" (FFmpeg flite TTS) with known 
 | Transcript correction, SRT/VTT import & export | ✅ | API + E2E (corrected word appears in the exported SRT) |
 | Scene detection (PySceneDetect), motion, faces, mouth activity, saliency | ✅ | Video tests (face presence > 90%, scene cuts) |
 | Sentence & topic segmentation (lexical + pause + scene evidence) | ✅ | Unit tests; recovers the scripted topic boundaries |
-| Speaker diarisation (spectral clustering) | 🟠 | **Experimental.** Recovered both synthetic voices exactly (2 speakers, confidence 0.92); real-world accuracy unknown. No neural diariser |
+| Speaker diarisation | ✅ / 🟡 | Spectral heuristic by default; **optional neural voice encoder** (Resemblyzer GE2E, run in numpy, opt-in install, see TUNING.md). Both get 100% on the clean two-voice podcast. On a harsher 3-voice, random-channel stress test (held-out seeds): neural 56–83%, spectral 42–64%. Tested on synthetic TTS voices only, so real-world accuracy is not established |
 | Candidate generation on sentence boundaries with padding & cut-snapping | ✅ | Unit + video tests (no clip starts mid-sentence) |
 | 7-factor explainable, reproducible, configurable scoring | ✅ | Unit tests (breakdown sums to score, bounded, reproducible) |
 | Overlap/similarity/topic-diversity selection; fewer clips when quality is low | ✅ | Unit tests |
 | Grounded titles, hooks, reasons, audiences, issues | ✅ | Unit tests |
 | Content modes (8) | 🟡 | Podcast fully exercised; other modes are weight/cue presets with no dedicated tests |
+| Clip ratings (👍/👎) and learned per-mode weights | ✅ | `test_tuning.py`: learner direction, regularisation, refusal on too few or one-sided ratings, noise not recommended, migration v3, API + pipeline hook; component tests for the buttons and Settings panel. Learned weights are only switched on when cross-validated ranking accuracy does not drop |
+| Evaluation harness vs hand-picked clips (`python -m clipforge.devtools.evaluate`) | ✅ | Exact-metric unit tests; CLI run on the generated podcast (topic segments as golden: P = R = 100%, IoU 0.95). See TUNING.md |
 | Custom natural-language instructions (duration, themes, focus/avoid terms, pauses, profanity, intros) | ✅ | Unit tests (incl. a fixed bug where "nothing about X" boosted X) |
 | No-speech handling (no invented clips) | ✅ | `test_no_audio_source_does_not_invent_highlights` |
-| LLM refinement: Ollama / Anthropic adapters with JSON-schema validation | 🟡 | Validation logic tested with a fake provider (rejects hallucinated boundaries). **No live calls** — no Ollama server or API key in this environment |
-| Token usage & cost tracking | 🟡 | Recorded per call; untested without a provider |
+| LLM refinement: Ollama / Anthropic adapters with JSON-schema validation | ✅ / 🟡 | Exercised end to end against **local protocol stubs**: the real analysis pipeline over the Ollama API, and the official Anthropic SDK against a Messages-API stub (request shape, structured-output schema, validation retry, refusal/truncation/auth/rate-limit handling, server-side refusal fallback, consent gating; only transcript text is sent). This found and fixed a schema bug that broke Claude refinement. **Not run against a real Ollama model or the live API** (no server/key here) |
+| Token usage & cost tracking | ✅ | Recorded and priced per call (both validation attempts; fallback-served turns priced at the serving model). Tested against the stubs |
 
 ## Editing
 
@@ -66,16 +83,16 @@ The test media is a generated two-voice "podcast" (FFmpeg flite TTS) with known 
 | Multi-track timeline UI (drag/trim, snapping, zoom, lock/hide/mute/solo, thumbnails, waveform) | 🟡 | Built and visually verified; drag interactions not automated |
 | Captions: 10 presets, full styling, word-level timing, animations, safe areas | ✅ | All 10 rendered through the exporter; Bold Social, Karaoke, Creator, Clean White and Neon visually checked |
 | Caption editor (select/correct/emphasise/hide words, SRT/VTT import & export) | ✅ | Component test + E2E |
-| Drag captions directly on the canvas | 🟠 | Position via sliders; **text/graphic layers** are draggable on canvas, the caption block is not |
+| Drag captions directly on the canvas | ✅ | The caption block, text and graphic layers are draggable on the preview canvas (undoable as one step) |
 | Text layers (title, hook, callout, lower third, label) with animations | ✅ | Rendered and pixel-validated |
 | Graphics (highlight box, shape, circle, arrow, progress bar, logo/image) | ✅ | Rendered and visually verified |
-| Effects (zoom, pan, blur, vignette, exposure, contrast, saturation, grade, fades, freeze, mask, sharpen) | 🟡 | Zoom/fade/grade/vignette exercised by recipes; the others are implemented in the renderer and preview with no dedicated render tests |
-| Transitions (cut, crossfade, fade to black/white, slide, zoom, blur) | ✅ / 🟡 | Crossfade and slide rendered and visually verified; the others implemented but not verified |
-| Speed changes | 🟡 | Renderer (setpts/atempo) and UI implemented; untested |
-| Keyframe editing | 🟠 | Crop keyframes via the inspector at the playhead; no keyframe lane/graph UI |
-| Volume envelopes | 🟠 | Supported by schema and audio renderer; no UI to draw envelope points (clip gain only) |
+| Effects (zoom, pan, blur, vignette, exposure, contrast, saturation, grade, fades, freeze, mask, sharpen) | ✅ | Each has a render test in `test_render_effects.py` that measures the pixels it changes |
+| Transitions (cut, crossfade, fade to black/white, slide, zoom, blur) | ✅ | Parametrised render test per transition, each checking its own signature: crossfade ≈ average of both clips, fades reach black/white at the cut, slide shows A left and B right, zoom differs from both, blur drops sharpness |
+| Speed changes | ✅ | `test_speed_change_and_sync`: duration and A/V sync after setpts/atempo |
+| Keyframe editing | ✅ / 🟡 | Keyframe diamonds on the video lane (drag in time with snapping; select to edit position, zoom and easing; delete). Store tests; drag gestures not browser-automated |
+| Volume envelopes | ✅ / 🟡 | Drawn on dialogue, music and SFX clips (double-click adds a point, drag to move, inspector to edit). `test_volume_envelope_is_audible` measures the level change in the render. Fixed a bug where envelopes on clips with an incoming crossfade were shifted by the handle length |
 | Exact Frame (export-engine still) | ✅ | E2E step 7 |
-| Live preview fidelity | 🟠 | Same layout, fonts and maths; crossfade/slide/zoom transitions, B-roll and music are previewed only via Exact Frame and export |
+| Live preview fidelity | ✅ / 🟡 | Same layout, fonts and maths as the exporter. Crossfade/slide/zoom use a second decoder that takes over at the cut. B-roll plays in place; music/SFX play with gain, envelopes, fades, ducking, mute/solo. E2E step 11: live crossfade frame vs exporter still differ by 2.8/255 mean (≈23 to either side alone), B-roll region by 8.4 (126 without it). Not live: sharpen (Exact Frame shows it), dialogue boost above 0 dB (browser volume caps at 1.0), and B-roll codecs the browser cannot decode (labelled) |
 
 ## Framing
 
@@ -96,7 +113,7 @@ The test media is a generated two-voice "podcast" (FFmpeg flite TTS) with known 
 | Two-pass loudness normalisation (−14 LUFS default), true-peak limiter | ✅ | Measured −14.0 ± 0.1 LUFS, TP ≤ −1.2 dBFS |
 | Voice presets (Natural, Podcast Clean, Voice Forward, Cinematic, Gaming), EQ, HPF, gentle denoise, compressor | 🟡 | Applied in all renders; no listening tests |
 | Background music with ducking, SFX, fades, loop | ✅ / 🟡 | Music + ducking rendered and validated; SFX/loop untested |
-| Mute/solo, per-track gain, dialogue gain, stereo preserved | 🟡 | Implemented in mix graph; partially exercised |
+| Mute/solo, per-track gain, dialogue gain, stereo preserved | ✅ / 🟡 | Mix-graph unit tests for track gain, envelopes, mute and solo; per-track gain UI in the timeline headers. Stereo preservation not separately tested |
 | Missing-audio sources (silent AAC track) | ✅ | `test_render_without_audio_and_rotated_source` |
 
 ## Rendering & export
@@ -145,11 +162,12 @@ The test media is a generated two-voice "podcast" (FFmpeg flite TTS) with known 
 
 ## Continuation checklist
 
-1. **Run on a Mac:** `./clipforge.sh test` and `./clipforge.sh e2e`; render once with VideoToolbox; confirm the Keychain secret storage and faster-whisper `small` model download.
-2. **Real-footage tuning:** analyse 5–10 real podcasts/interviews and compare picks against your own choices. Adjust `analysis/modes.py` weights and cues (all scoring is centralised there and in `analysis/highlights.py`).
-3. **Live LLM verification:** test Ollama (`qwen2.5:7b-instruct`) and Anthropic refinement and social copy end to end; check cost tracking.
-4. **Preview fidelity:** live crossfade/slide previews (second `<video>` for the incoming clip), B-roll playback, and Web Audio for music preview.
-5. **Editor depth:** keyframe lane UI, volume-envelope drawing, drag-to-position captions, track gain UI, dedicated render tests for each effect and transition.
-6. **Neural diarisation (optional):** pyannote or similar behind a setting, to improve Speaker Focus on multi-camera podcasts.
-7. **Packaging:** a macOS `.app` wrapper (e.g. a small launcher plus a bundled Python runtime) and auto-start.
-8. **Test media:** add VFR, HDR (HLG/PQ), 4K and MKV/HEVC samples to the video suite.
+Done since the first build: edge-case media (VFR, HDR PQ/HLG, 4K, MKV/HEVC), a render test per effect and transition, the keyframe lane, volume envelopes, canvas caption dragging, track gain, live preview of transitions/B-roll/music, LLM protocol-stub integration tests, clip ratings with learned weights, the evaluation harness, and optional neural speaker embeddings.
+
+Still open:
+
+1. **Run on a Mac (blocked here).** No computer was connected to this cloud session. On a Mac, run `./clipforge.sh test` and `./clipforge.sh e2e`, render once with VideoToolbox, and confirm Keychain secret storage and the faster-whisper `small` model download. To let a cloud session do this, share a folder via the Claude desktop app (Settings → Claude Code → Remote Control).
+2. **Real footage.** Rate clips on 5–10 of your own podcasts, learn weights, and measure with `python -m clipforge.devtools.evaluate` against clips you would have cut (TUNING.md). Nothing here has been validated on real recordings.
+3. **Live LLM check.** One real run each with Ollama (`qwen2.5:7b-instruct`) and an Anthropic key. The protocol is covered by the stubs; model quality is not.
+4. **Packaging (not started).** A macOS `.app` wrapper (small launcher plus a bundled Python runtime) and auto-start.
+5. **Smaller gaps.** Brand-kit intro/outro clips; a browser-automated drag test for timeline gestures; dialogue boost above 0 dB in the live preview (needs Web Audio).
