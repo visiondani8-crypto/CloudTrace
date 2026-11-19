@@ -35,6 +35,11 @@ ANTHROPIC_PRICING = {
     "claude-sonnet-5-5": (2.0, 10.0),
     "claude-haiku-5-5": (0.10, 0.50),
     "claude-fable-5-2": (8.0, 40.0),
+    # Models the server-side refusal fallback may route to
+    "claude-opus-5": (5.0, 25.0),
+    "claude-opus-4-8": (5.0, 25.0),
+    "claude-sonnet-5": (2.0, 10.0),
+    "claude-fable-5-1": (10.0, 50.0),
 }
 
 
@@ -51,6 +56,7 @@ class Usage:
     input_tokens: int = 0
     output_tokens: int = 0
     cost_usd: float = 0.0
+    fallback_used: bool = False
 
 
 class Provider:
@@ -153,7 +159,10 @@ class AnthropicProvider(Provider):
 
     def generate_json(self, system: str, prompt: str, schema: type[T], purpose: str, max_tokens: int = 8000) -> tuple[T, Usage]:
         anthropic, client = self._client()
-        js = _strict_schema(schema.model_json_schema())
+        # The SDK's transform keeps the schema within what structured outputs accept (additionalProperties
+        # false, every field required) and moves unsupported constraints (maximum, maxLength, maxItems…)
+        # into field descriptions; pydantic re-validates them on the reply below.
+        js = anthropic.transform_schema(schema)
         messages: list[dict[str, Any]] = [{"role": "user", "content": prompt}]
         usage = Usage("anthropic", self.model)
         last_err: Exception | None = None
@@ -181,6 +190,11 @@ class AnthropicProvider(Provider):
             u = getattr(resp, "usage", None)
             usage.input_tokens += int(getattr(u, "input_tokens", 0) or 0)
             usage.output_tokens += int(getattr(u, "output_tokens", 0) or 0)
+            # A server-side fallback serves the turn on another model, billed at that model's rates.
+            if any(getattr(it, "type", "") == "fallback_message" for it in (getattr(u, "iterations", None) or [])):
+                usage.fallback_used = True
+                usage.model = getattr(resp, "model", None) or usage.model
+                log.info("Request served by fallback model %s", usage.model)
             if resp.stop_reason == "refusal":
                 raise ProviderError("The model declined this request.", "Results fall back to local analysis.")
             if resp.stop_reason == "max_tokens":
@@ -199,26 +213,6 @@ class AnthropicProvider(Provider):
                 ]
         _record(usage, purpose)
         raise ProviderError(f"Invalid structured output from Claude: {str(last_err)[:300]}")
-
-
-def _strict_schema(js: dict[str, Any]) -> dict[str, Any]:
-    """Inline $defs and set additionalProperties=false for strict JSON schema output."""
-    defs = js.pop("$defs", {})
-
-    def resolve(node: Any) -> Any:
-        if isinstance(node, dict):
-            if "$ref" in node:
-                return resolve(defs[node["$ref"].split("/")[-1]])
-            out = {k: resolve(v) for k, v in node.items() if k not in ("title", "default")}
-            if out.get("type") == "object":
-                out["additionalProperties"] = False
-                out["required"] = list(out.get("properties", {}).keys())
-            return out
-        if isinstance(node, list):
-            return [resolve(x) for x in node]
-        return node
-
-    return resolve(js)
 
 
 def _record(u: Usage, purpose: str) -> None:

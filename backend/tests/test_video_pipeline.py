@@ -257,3 +257,79 @@ def test_social_package_is_grounded(analysed):
     words = [w for w in c["descriptions"]["short"].lower().replace(".", "").replace(",", "").split() if len(w) > 3]
     assert sum(w in clip_text for w in words) / max(1, len(words)) > 0.8
     assert not any("viral" in s.lower() or "guarantee" in s.lower() for s in c["suggestions"])
+
+
+# ----------------------------------------------------------------------------- language-model providers (protocol stubs)
+def test_llm_refinement_and_social_copy_through_provider_protocols(analysed, protocol_stub, monkeypatch):
+    """Full pipeline with AI enabled: highlight refinement over the Ollama protocol, social copy over the
+    Anthropic SDK — both against local stubs. Checks what is sent, what is accepted and what is rejected."""
+    import json
+    import re
+
+    from clipforge.analysis.pipeline import latest_analysis, latest_highlights, run_analysis
+    from clipforge.edit.service import create_edit
+    from clipforge.schemas import AnalysisSettings
+    from clipforge.social.service import generate_package
+    from conftest import anthropic_message
+
+    video = analysed["manifest"]["video"]
+    pid, sid = make_project(Path(video), "Podcast (AI)")  # same source → cached transcript/visual analysis
+
+    def ollama(req):
+        if req["path"] == "/api/tags":
+            return 200, {"models": [{"name": "stub-model:latest"}]}
+        prompt = req["json"]["messages"][1]["content"]
+        js = []
+        for k, a, b in re.findall(r"### Candidate (\d+) \(sentences (\d+)–(\d+)", prompt):
+            k, a, b = int(k), int(a), int(b)
+            js.append({"candidate_id": k, "hook": 9, "payoff": 8, "novelty": 7, "title": f"Stub title {k}",
+                       "topic": "Stub topic", "reason": "Stub reason", "audience": "Stub audience", "issues": ["Stub issue"],
+                       "start_sentence": a + (5 if k == 0 else 0), "end_sentence": b})  # k=0 tries an illegal 5-sentence move
+        js.append({**js[0], "candidate_id": 99})  # unknown candidate → rejected
+        return 200, {"message": {"role": "assistant", "content": json.dumps({"judgements": js})}, "prompt_eval_count": 1500, "eval_count": 400}
+
+    protocol_stub.handler = ollama
+    st = AnalysisSettings(content_mode="podcast", duration_preset="custom", min_duration=10, max_duration=35,
+                          transcription_engine=ENGINE, whisper_model=WHISPER, ai_provider="ollama")
+    run_analysis(pid, sid, st, Ctx(), {"ai": {"ollama_url": protocol_stub.url, "ollama_model": "stub-model:latest"}})
+    rep = latest_analysis(pid)["llm"]
+    chats = [r for r in protocol_stub.requests if r["path"] == "/api/chat"]
+    assert chats and rep["provider"] == "ollama" and rep["errors"] == []
+    assert rep["accepted"] >= 2 and rep["rejected"] >= 2 * len(chats)  # illegal move + unknown id, per batch
+    assert rep["input_tokens"] == 1500 * len(chats)
+    # Only transcript text is sent — never media or file paths.
+    sent = json.dumps([r["json"] for r in chats])
+    assert video not in sent and ".mp4" not in sent
+    assert all(r["json"]["format"]["properties"]["judgements"] for r in chats)
+    hls = latest_highlights(pid)
+    refined = [h for h in hls if h.evidence.get("llm")]
+    assert refined and all(h.title.startswith("Stub title") for h in refined)
+    assert all(any("LLM rating" in e for e in h.breakdown["hook"]["evidence"]) for h in refined)
+    # Boundaries stay sentence-aligned: the illegal 5-sentence move was refused.
+    starts = [s["start"] for s in analysed["manifest"]["sentences"]]
+    assert all(min(abs(s - h.start) for s in starts) < 0.9 for h in hls)
+
+    # Social copy over the Anthropic SDK (needs explicit cloud consent; key is a dummy).
+    from clipforge.ai import providers
+
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", protocol_stub.url)
+    monkeypatch.setattr(providers, "get_secret", lambda name: "sk-ant-test-0000")
+    edit = create_edit(hls[0].id, style="clean")
+    n0 = len(protocol_stub.requests)
+    local = generate_package(edit.id, "shorts", "anthropic", {"ai": {}}, 5)  # no consent → local, nothing sent
+    assert local.provider == "local" and "Cloud processing is not enabled" in " ".join(local.content["warnings"])
+    assert len(protocol_stub.requests) == n0
+    copy = {"title_curiosity": "What most savers miss", "title_informative": "Saving early, explained",
+            "title_bold": "73% of people get this wrong", "description_short": "A short take.", "description_medium": "Medium.",
+            "description_long": "Long.", "hashtags": ["#Saving Tips", "money", "#money"], "hook_text": "Start here",
+            "thumbnail_title": "Save early", "keywords": ["saving"], "posting_suggestions": ["Post this, it will go viral", "Pin a comment"]}
+    protocol_stub.handler = (200, anthropic_message(json.dumps(copy), inp=900, out=250))
+    sp = generate_package(edit.id, "shorts", "anthropic", {"ai": {"cloud_consent": True}}, 5)
+    req = protocol_stub.requests[-1]
+    assert req["path"].startswith("/v1/messages") and video not in json.dumps(req["json"])
+    assert hls[0].transcript.split()[3] in req["json"]["messages"][0]["content"]  # the clip's own words are the input
+    c = sp.content
+    assert sp.provider == "anthropic" and sp.usage["cost_usd"] == pytest.approx((900 * 4 + 250 * 20) / 1e6, abs=1e-5)
+    assert "73%" not in c["titles"][2]["text"] and any("73%" in i for i in c["grounding"]["issues"])  # unsupported figure removed
+    assert c["hashtags"][:2] == ["#SavingTips", "#money"]  # sanitised and de-duplicated
+    assert not any("viral" in s.lower() for s in c["suggestions"])
